@@ -5,16 +5,20 @@ import {dirname,resolve} from "node:path";
 import {renderDemo,renderIndex,type DemoId} from "./render.js";
 import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
 import {renderConnectedTodayView} from "./connected-today.js";
+import {renderAgentsPage,renderApprovalsPage,renderWorkflowsPage} from "./operations-pages.js";
 import {db,databaseConfigured,dbHealth} from "../../../packages/db/src/index.js";
-import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
+import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,AgentRepository,ApprovalRepository,WorkflowRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
 import {hashPassword,verifyPassword,createSetupToken,verifySetupToken,createSession,verifySession} from "../../../packages/auth/src/index.js";
 import {resetRegistry,getVertical} from "../../../packages/module-registry/src/index.js";
 import {registerAtlasModules,registerAtlasVerticals} from "../../../packages/module-registry/src/catalog.js";
 import {intersectEnabledModules} from "../../../packages/entitlements/src/index.js";
 import type {AtlasRole,TenantPrincipal} from "../../../packages/tenancy/src/index.js";
+import {roleAtLeast} from "../../../packages/tenancy/src/index.js";
 import {buildToday,createPersistenceTodayProvider} from "../../../packages/today/src/index.js";
 import {resolveWorkspaceContext} from "../../../packages/context/src/index.js";
 import {answerAtlas} from "../../../packages/ask-atlas/src/index.js";
+import {seedDefaultAgents} from "../../../packages/agents/src/index.js";
+import {resolveWorkflowApproval} from "../../../packages/approvals/src/index.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -89,6 +93,7 @@ createServer(async(req,res)=>{
       register();const vertical=getVertical(verticalId);if(!vertical){html(res,renderOnboarding({email:setup.email,error:"That business type is not available."}),400);return;}
       const moduleIds=intersectEnabledModules("business",vertical.modules);const provisioned=await provisionWorkspace(db(),{userId:setup.userId,workspaceName,verticalId,moduleIds,planId:"business"});
       await new AuditRepository(db()).record({tenantId:provisioned.tenantId,workspaceId:provisioned.workspaceId},{actorId:setup.userId,action:"workspace.created",targetType:"workspace",targetId:provisioned.workspaceId,metadata:{verticalId,planId:"business"}});
+      await seedDefaultAgents(db(),{tenantId:provisioned.tenantId,workspaceId:provisioned.workspaceId},verticalId,moduleIds);
       const session=createSession({userId:setup.userId,tenantId:provisioned.tenantId,workspaceId:provisioned.workspaceId,role:"owner",scopes:["*"]},authSecret()!);
       redirect(res,"/app/today",[cookie("atlas_session",session,43200),clearCookie("atlas_setup")]);return;
     }
@@ -112,6 +117,55 @@ createServer(async(req,res)=>{
       const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
       const today=await buildToday({tenantId:principal.tenantId,workspaceId:principal.workspaceId},[createPersistenceTodayProvider(db())]);
       html(res,renderConnectedTodayView({workspaceName:workspace.name,verticalId:workspace.verticalId,planId:workspace.planId,billingStatus:workspace.billingStatus,trialEndsAt:workspace.trialEndsAt,modules,today}));return;
+    }
+
+    if(path==="/app/agents"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
+      const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
+      const agents=await seedDefaultAgents(db(),{tenantId:principal.tenantId,workspaceId:principal.workspaceId},workspace.verticalId,modules);
+      html(res,renderAgentsPage({workspaceName:workspace.name,agents,canManage:roleAtLeast(principal.role,"admin")}));return;
+    }
+
+    const agentToggle=path.match(/^\/app\/agents\/([^/]+)\/toggle$/);
+    if(agentToggle&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!roleAtLeast(principal.role,"admin")){json(res,{status:"forbidden",message:"Admin role is required to manage agents."},403);return;}
+      const data=await form(req);const enabled=data.get("enabled")==="true";const id=decodeURIComponent(agentToggle[1]);
+      const agentRepo=new AgentRepository(db());const agent=await agentRepo.findScoped({tenantId:principal.tenantId,workspaceId:principal.workspaceId},id);
+      if(!agent){json(res,{status:"not_found"},404);return;}
+      await agentRepo.setEnabled({tenantId:principal.tenantId,workspaceId:principal.workspaceId},id,enabled);
+      await new AuditRepository(db()).record({tenantId:principal.tenantId,workspaceId:principal.workspaceId},{actorId:principal.userId,action:enabled?"agent.enabled":"agent.disabled",targetType:"agent",targetId:id,metadata:{moduleId:agent.moduleId}});
+      redirect(res,"/app/agents");return;
+    }
+
+    if(path==="/app/approvals"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
+      const approvals=await new ApprovalRepository(db()).listPending({tenantId:principal.tenantId,workspaceId:principal.workspaceId});
+      html(res,renderApprovalsPage({workspaceName:workspace.name,approvals:[...approvals]}));return;
+    }
+
+    const approvalDecision=path.match(/^\/app\/approvals\/([^/]+)\/(approve|reject)$/);
+    if(approvalDecision&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      const data=await form(req);const note=(data.get("note")||"").slice(0,500);const decision=approvalDecision[2]==="approve"?"approved":"rejected";
+      try{
+        await resolveWorkflowApproval(db(),principal,decodeURIComponent(approvalDecision[1]),decision,note||undefined);
+      }catch(error){
+        const message=error instanceof Error?error.message:"approval-failed";
+        const status=message==="approval-permission-denied"?403:message==="approval-not-found"?404:409;
+        json(res,{status:"error",message},status);return;
+      }
+      redirect(res,"/app/approvals");return;
+    }
+
+    if(path==="/app/workflows"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
+      const workflowRepo=new WorkflowRepository(db());const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const [definitions,runs]=await Promise.all([workflowRepo.listDefinitions(scope),workflowRepo.listRuns(scope,100)]);
+      html(res,renderWorkflowsPage({workspaceName:workspace.name,definitions:[...definitions],runs}));return;
     }
 
     if(path==="/api/atlas/ask"&&method==="POST"){
