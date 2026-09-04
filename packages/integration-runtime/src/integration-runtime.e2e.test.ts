@@ -177,7 +177,7 @@ test("governed webhook execution completes once with scoped connection health an
 
     const completed=await runtime.processNext();
     assert.equal(completed?.id,runId);
-    assert.equal(completed?.status,"completed");
+    assert.equal(completed?.status,"completed",completed?.lastError??"governed webhook workflow should complete");
     assert.equal(transport.effects,1,"external provider effect occurs once");
     assert.equal(transport.requests.length,1);
     assert.equal(transport.requests[0].headers["idempotency-key"],`${scope.workspaceId}:${runId}:external:webhook.customer-followup`);
