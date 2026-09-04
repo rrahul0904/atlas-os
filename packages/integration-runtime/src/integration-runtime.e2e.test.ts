@@ -124,6 +124,9 @@ test("governed webhook execution completes once with scoped connection health an
       }
     });
     assert.equal(connection.config.secretReference,undefined,"secret reference must stay outside config JSON");
+    const hydratedConnection=await connections.findByIntegration(scope,"webhook");
+    assert.ok(Array.isArray(hydratedConnection?.config.allowedMethods),"webhook config must hydrate from JSONB as an object");
+    assert.equal((hydratedConnection?.config.allowedMethods as unknown[])[0],"POST");
 
     const transport=new DeterministicTransport(200,true);
     const adapter=new WebhookIntegrationAdapter(new TestSecrets(),transport,async()=>["93.184.216.34"]);
