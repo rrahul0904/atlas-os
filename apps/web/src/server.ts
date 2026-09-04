@@ -6,8 +6,9 @@ import {renderDemo,renderIndex,type DemoId} from "./render.js";
 import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
 import {renderConnectedTodayView} from "./connected-today.js";
 import {renderAgentsPage,renderApprovalsPage,renderWorkflowsPage} from "./operations-pages.js";
+import {renderIntegrationsPage} from "./integrations-page.js";
 import {db,databaseConfigured,dbHealth} from "../../../packages/db/src/index.js";
-import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,AgentRepository,ApprovalRepository,WorkflowRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
+import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,AgentRepository,ApprovalRepository,WorkflowRepository,IntegrationConnectionRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
 import {hashPassword,verifyPassword,createSetupToken,verifySetupToken,createSession,verifySession} from "../../../packages/auth/src/index.js";
 import {resetRegistry,getVertical} from "../../../packages/module-registry/src/index.js";
 import {registerAtlasModules,registerAtlasVerticals} from "../../../packages/module-registry/src/catalog.js";
@@ -19,6 +20,7 @@ import {resolveWorkspaceContext} from "../../../packages/context/src/index.js";
 import {answerAtlas} from "../../../packages/ask-atlas/src/index.js";
 import {seedDefaultAgents} from "../../../packages/agents/src/index.js";
 import {resolveWorkflowApproval} from "../../../packages/approvals/src/index.js";
+import {WebhookIntegrationAdapter,validateWebhookConfiguration,type WebhookConfig} from "../../../packages/integrations-webhook/src/index.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -166,6 +168,75 @@ createServer(async(req,res)=>{
       const workflowRepo=new WorkflowRepository(db());const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
       const [definitions,runs]=await Promise.all([workflowRepo.listDefinitions(scope),workflowRepo.listRuns(scope,100)]);
       html(res,renderWorkflowsPage({workspaceName:workspace.name,definitions:[...definitions],runs}));return;
+    }
+
+    if(path==="/app/integrations"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!roleAtLeast(principal.role,"operator")){json(res,{status:"forbidden",message:"Operator role or higher is required to view integrations."},403);return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);
+      if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
+      const connections=await new IntegrationConnectionRepository(db()).list({tenantId:principal.tenantId,workspaceId:principal.workspaceId});
+      html(res,renderIntegrationsPage({workspaceName:workspace.name,connections,canManage:roleAtLeast(principal.role,"admin")}));return;
+    }
+
+    if(path==="/app/integrations/webhook/save"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!roleAtLeast(principal.role,"admin")){json(res,{status:"forbidden",message:"Admin role is required to configure integrations."},403);return;}
+      const data=await form(req);
+      const baseUrl=(data.get("baseUrl")||"").trim();
+      const allowedHosts=(data.get("allowedHosts")||"").split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean);
+      const allowedPaths=(data.get("allowedPaths")||"").split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean);
+      const allowedMethods=data.getAll("method").filter(value=>["POST","PUT","PATCH"].includes(value)) as Array<"POST"|"PUT"|"PATCH">;
+      const healthPath=(data.get("healthPath")||"").trim();
+      const secretReference=(data.get("secretReference")||"").trim();
+      const authHeaderName=(data.get("authHeaderName")||"authorization").trim();
+      const authPrefix=data.get("authPrefix")??"Bearer ";
+      const timeoutMs=Math.max(250,Math.min(30000,Number(data.get("timeoutMs")||8000)));
+      if(secretReference&&!/^env:[A-Z][A-Z0-9_]{2,127}$/.test(secretReference)){
+        json(res,{status:"invalid_request",message:"Secret reference must use env:NAME syntax; raw secrets are not accepted."},400);return;
+      }
+      const config:WebhookConfig={baseUrl,allowedHosts,allowedPaths,allowedMethods,timeoutMs,authHeaderName,authPrefix,...(healthPath?{healthPath}:{})};
+      try{validateWebhookConfiguration(config)}catch(error){
+        json(res,{status:"invalid_request",message:error instanceof Error?error.message:"invalid-webhook-configuration"},400);return;
+      }
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const repository=new IntegrationConnectionRepository(db());
+      const connection=await repository.upsert(scope,{
+        integrationId:"webhook",
+        status:"degraded",
+        externalAccountRef:new URL(baseUrl).host,
+        secretReference:secretReference||null,
+        config
+      });
+      const health=await new WebhookIntegrationAdapter().health({ ...scope,connectionId:connection.id},config);
+      await repository.updateHealth(scope,connection.id,health);
+      await new AuditRepository(db()).record(scope,{
+        actorId:principal.userId,
+        action:"integration.configured",
+        targetType:"integration_connection",
+        targetId:connection.id,
+        metadata:{integrationId:"webhook",host:new URL(baseUrl).host,methods:allowedMethods,pathCount:allowedPaths.length,healthState:health.state}
+      });
+      redirect(res,"/app/integrations");return;
+    }
+
+    if(path==="/app/integrations/webhook/check"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!roleAtLeast(principal.role,"admin")){json(res,{status:"forbidden",message:"Admin role is required to check integration health."},403);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const repository=new IntegrationConnectionRepository(db());
+      const connection=await repository.findByIntegration(scope,"webhook");
+      if(!connection){json(res,{status:"not_found",message:"Webhook integration is not configured."},404);return;}
+      const health=await new WebhookIntegrationAdapter().health({...scope,connectionId:connection.id},connection.config as unknown as WebhookConfig);
+      await repository.updateHealth(scope,connection.id,health);
+      await new AuditRepository(db()).record(scope,{
+        actorId:principal.userId,
+        action:"integration.health_checked",
+        targetType:"integration_connection",
+        targetId:connection.id,
+        metadata:{integrationId:"webhook",state:health.state}
+      });
+      redirect(res,"/app/integrations");return;
     }
 
     if(path==="/api/atlas/ask"&&method==="POST"){
