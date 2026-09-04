@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "description": "AI-native business operating system — Observe, Understand, Decide, Act, Automate, Learn.",
-  "workspaces": ["packages/*","apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
@@ -13,9 +16,17 @@
     "start:web": "node dist/apps/web/src/server.js",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:check": "node scripts/db-check.mjs",
-    "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo"
+    "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo",
+    "start:worker": "node dist/apps/worker/src/index.js"
   },
-  "engines": {"node":"22.x"},
-  "dependencies": {"postgres":"^3.4.7"},
-  "devDependencies": {"@types/node":"^22.15.0","typescript":"^5.8.3"}
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
 }
