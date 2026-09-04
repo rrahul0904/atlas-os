@@ -93,7 +93,7 @@ test("durable workflow governance lifecycle is certified in PostgreSQL",async()=
 
     const paused=await runtime.processNext();
     assert.equal(paused?.id,runId);
-    assert.equal(paused?.status,"waiting_approval");
+    assert.equal(paused?.status,"waiting_approval",paused?.lastError??"workflow should pause for approval");
     assert.equal(simulation.executionCount,0,"tool must not execute before approval");
 
     const pending=(await approvals.listPending(scope))[0];
