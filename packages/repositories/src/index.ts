@@ -1,6 +1,8 @@
 import {randomUUID} from "node:crypto";
 import type {AtlasRole} from "../../tenancy/src/index.js";
 import type {AtlasSql} from "../../db/src/index.js";
+import type {EvidenceRecord,EvidenceSourceType} from "../../evidence/src/index.js";
+import type {BusinessActionItem,ActionSeverity,ActionMode,ActionStatus} from "../../action-center/src/index.js";
 
 export interface StoredUser{id:string;email:string;displayName:string|null;passwordHash:string|null;createdAt:string}
 export interface StoredWorkspace{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string;trialEndsAt:string|null;createdAt:string}
@@ -114,6 +116,53 @@ export class EventRepository{
     const id=randomUUID();
     await this.sql`INSERT INTO atlas_events(id,tenant_id,workspace_id,module,type,entity_type,entity_id,properties,occurred_at) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.module},${input.type},${input.entityType??null},${input.entityId??null},${JSON.stringify(input.properties??{})}::jsonb,${input.occurredAt??new Date().toISOString()})`;
     return id;
+  }
+  async recent(scope:{tenantId:string;workspaceId:string},limit=50){
+    const safeLimit=Math.max(1,Math.min(200,Math.floor(limit)));
+    return this.sql`SELECT id,module,type,entity_type,entity_id,properties,occurred_at FROM atlas_events
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+      ORDER BY occurred_at DESC LIMIT ${safeLimit}`;
+  }
+}
+
+export class EvidenceRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async record(scope:{tenantId:string;workspaceId:string},input:{sourceType:EvidenceSourceType;sourceId:string;claim:string;confidence:number;metadata?:Record<string,string|number|boolean|null>;observedAt?:string}):Promise<EvidenceRecord>{
+    const id=randomUUID();const observedAt=input.observedAt??new Date().toISOString();
+    const rows=await this.sql`INSERT INTO atlas_evidence(id,tenant_id,workspace_id,source_type,source_id,claim,confidence,metadata,observed_at)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.sourceType},${input.sourceId},${input.claim},${input.confidence},${JSON.stringify(input.metadata??{})}::jsonb,${observedAt})
+      RETURNING created_at`;
+    return{id,...scope,sourceType:input.sourceType,sourceId:input.sourceId,claim:input.claim,confidence:input.confidence,metadata:input.metadata??{},observedAt,createdAt:new Date(rows[0].created_at).toISOString()};
+  }
+  async listRecent(scope:{tenantId:string;workspaceId:string},limit=50):Promise<EvidenceRecord[]>{
+    const safeLimit=Math.max(1,Math.min(200,Math.floor(limit)));
+    const rows=await this.sql`SELECT id,tenant_id,workspace_id,source_type,source_id,claim,confidence,metadata,observed_at,created_at
+      FROM atlas_evidence WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+      ORDER BY observed_at DESC LIMIT ${safeLimit}`;
+    return rows.map(r=>({id:r.id,tenantId:r.tenant_id,workspaceId:r.workspace_id,sourceType:r.source_type as EvidenceSourceType,sourceId:r.source_id,claim:r.claim,confidence:Number(r.confidence),metadata:r.metadata??{},observedAt:new Date(r.observed_at).toISOString(),createdAt:new Date(r.created_at).toISOString()}));
+  }
+  async findByIds(scope:{tenantId:string;workspaceId:string},ids:string[]):Promise<EvidenceRecord[]>{
+    if(!ids.length)return[];
+    const recent=await this.listRecent(scope,200);
+    const wanted=new Set(ids);return recent.filter(row=>wanted.has(row.id));
+  }
+}
+
+export class ActionItemRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async create(scope:{tenantId:string;workspaceId:string},input:{sourceModule:string;entity?:{type:string;id:string};title:string;description:string;severity:ActionSeverity;businessImpact:string;evidenceIds:string[];recommendedAction:string;risk:string;approvalPolicy:ActionMode;status?:ActionStatus}):Promise<BusinessActionItem>{
+    const id=randomUUID();const status=input.status??"open";
+    const rows=await this.sql`INSERT INTO atlas_action_items(id,tenant_id,workspace_id,source_module,entity_type,entity_id,title,description,severity,business_impact,evidence_ids,recommended_action,risk,approval_policy,status)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.sourceModule},${input.entity?.type??null},${input.entity?.id??null},${input.title},${input.description},${input.severity},${input.businessImpact},${input.evidenceIds},${input.recommendedAction},${input.risk},${input.approvalPolicy},${status})
+      RETURNING created_at`;
+    return{id,...scope,sourceModule:input.sourceModule,entity:input.entity,title:input.title,description:input.description,severity:input.severity,businessImpact:input.businessImpact,evidenceIds:input.evidenceIds,recommendedAction:input.recommendedAction,risk:input.risk,approvalPolicy:input.approvalPolicy,status,createdAt:new Date(rows[0].created_at).toISOString()};
+  }
+  async listOpen(scope:{tenantId:string;workspaceId:string},limit=50):Promise<BusinessActionItem[]>{
+    const safeLimit=Math.max(1,Math.min(200,Math.floor(limit)));
+    const rows=await this.sql`SELECT id,tenant_id,workspace_id,source_module,entity_type,entity_id,title,description,severity,business_impact,evidence_ids,recommended_action,risk,approval_policy,status,created_at
+      FROM atlas_action_items WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND status IN ('open','in_progress','waiting_approval')
+      ORDER BY CASE severity WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END DESC, created_at ASC LIMIT ${safeLimit}`;
+    return rows.map(r=>({id:r.id,tenantId:r.tenant_id,workspaceId:r.workspace_id,sourceModule:r.source_module,entity:r.entity_type&&r.entity_id?{type:r.entity_type,id:r.entity_id}:undefined,title:r.title,description:r.description,severity:r.severity as ActionSeverity,businessImpact:r.business_impact,evidenceIds:r.evidence_ids??[],recommendedAction:r.recommended_action,risk:r.risk,approvalPolicy:r.approval_policy as ActionMode,status:r.status as ActionStatus,createdAt:new Date(r.created_at).toISOString()}));
   }
 }
 
