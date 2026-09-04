@@ -207,7 +207,7 @@ createServer(async(req,res)=>{
         status:"degraded",
         externalAccountRef:new URL(baseUrl).host,
         secretReference:secretReference||null,
-        config
+        config:config as unknown as Record<string,unknown>
       });
       const health=await new WebhookIntegrationAdapter().health({ ...scope,connectionId:connection.id},config);
       await repository.updateHealth(scope,connection.id,health);
