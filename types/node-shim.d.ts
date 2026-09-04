@@ -41,7 +41,7 @@ declare module "node:path" {
   export function resolve(...paths: string[]): string;
   export function join(...paths: string[]): string;
 }
-declare const process: { env: Record<string,string|undefined> };
+declare const process: { env: Record<string,string|undefined>; on(event: string, listener: () => void): void; };
 declare const Buffer: {
   from(value: string | Uint8Array, encoding?: string): Uint8Array & {
     toString(encoding?: string): string;
