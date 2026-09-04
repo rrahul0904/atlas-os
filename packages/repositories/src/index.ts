@@ -3,6 +3,7 @@ import type {AtlasRole} from "../../tenancy/src/index.js";
 import type {AtlasSql} from "../../db/src/index.js";
 import type {EvidenceRecord,EvidenceSourceType} from "../../evidence/src/index.js";
 import type {BusinessActionItem,ActionSeverity,ActionMode,ActionStatus} from "../../action-center/src/index.js";
+import type {WorkflowDefinition,WorkflowStepKind} from "../../workflows/src/index.js";
 
 export interface StoredUser{id:string;email:string;displayName:string|null;passwordHash:string|null;createdAt:string}
 export interface StoredWorkspace{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string;trialEndsAt:string|null;createdAt:string}
@@ -96,8 +97,24 @@ export class TaskRepository{
 
 export class ApprovalRepository{
   constructor(private readonly sql:AtlasSql){}
+  async create(scope:{tenantId:string;workspaceId:string},input:{agentId?:string|null;toolId:string;action:string;risk:string;evidence?:unknown[];businessReason?:string;externalSystem?:string;target?:string;estimatedCost?:number;requestedBy?:string;workflowRunId?:string;workflowStepId?:string}){
+    const id=randomUUID();
+    const rows=await this.sql`INSERT INTO atlas_approvals(id,tenant_id,workspace_id,agent_id,tool_id,action,risk,status,evidence,business_reason,external_system,target,estimated_cost,requested_by,workflow_run_id,workflow_step_id)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.agentId??null},${input.toolId},${input.action},${input.risk},'pending',${JSON.stringify(input.evidence??[])}::jsonb,${input.businessReason??null},${input.externalSystem??null},${input.target??null},${input.estimatedCost??null},${input.requestedBy??null},${input.workflowRunId??null},${input.workflowStepId??null})
+      RETURNING *`;
+    return rows[0];
+  }
   async listPending(scope:{tenantId:string;workspaceId:string}){
-    return this.sql`SELECT id,agent_id,tool_id,action,risk,status,evidence,requested_at FROM atlas_approvals WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND status='pending' ORDER BY requested_at`;
+    return this.sql`SELECT id,agent_id,tool_id,action,risk,status,evidence,business_reason,external_system,target,estimated_cost,requested_by,workflow_run_id,workflow_step_id,requested_at FROM atlas_approvals WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND status='pending' ORDER BY requested_at`;
+  }
+  async findScoped(scope:{tenantId:string;workspaceId:string},id:string){
+    const rows=await this.sql`SELECT * FROM atlas_approvals WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
+    return rows[0]??null;
+  }
+  async resolve(scope:{tenantId:string;workspaceId:string},id:string,input:{decision:"approved"|"rejected";resolvedBy:string;note?:string}){
+    const rows=await this.sql`UPDATE atlas_approvals SET status=${input.decision},resolved_by=${input.resolvedBy},resolution_note=${input.note??null},resolved_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} AND status='pending' RETURNING *`;
+    return rows[0]??null;
   }
 }
 
@@ -164,6 +181,112 @@ export class ActionItemRepository{
       ORDER BY CASE severity WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END DESC, created_at ASC LIMIT ${safeLimit}`;
     return rows.map(r=>({id:r.id,tenantId:r.tenant_id,workspaceId:r.workspace_id,sourceModule:r.source_module,entity:r.entity_type&&r.entity_id?{type:r.entity_type,id:r.entity_id}:undefined,title:r.title,description:r.description,severity:r.severity as ActionSeverity,businessImpact:r.business_impact,evidenceIds:r.evidence_ids??[],recommendedAction:r.recommended_action,risk:r.risk,approvalPolicy:r.approval_policy as ActionMode,status:r.status as ActionStatus,createdAt:new Date(r.created_at).toISOString()}));
   }
+}
+
+export interface StoredAgent{
+  id:string;tenantId:string;workspaceId:string;name:string;moduleId:string;description:string;tools:string[];scopes:string[];
+  riskPolicy:Record<string,unknown>;costBudgetDaily:number;modelPreference:string|null;memoryScope:string;enabled:boolean;
+}
+
+export class AgentRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async create(scope:{tenantId:string;workspaceId:string},input:{name:string;moduleId:string;description:string;tools:string[];scopes:string[];riskPolicy?:Record<string,unknown>;costBudgetDaily?:number;modelPreference?:string|null;memoryScope?:string;enabled?:boolean}):Promise<StoredAgent>{
+    const id=randomUUID();
+    const rows=await this.sql`INSERT INTO atlas_agents(id,tenant_id,workspace_id,name,module_id,description,tools,scopes,risk_policy,cost_budget_daily,model_preference,memory_scope,enabled)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.name},${input.moduleId},${input.description},${input.tools},${input.scopes},${JSON.stringify(input.riskPolicy??{})}::jsonb,${input.costBudgetDaily??0},${input.modelPreference??null},${input.memoryScope??"workspace"},${input.enabled??true})
+      RETURNING *`;
+    return mapAgent(rows[0]);
+  }
+  async list(scope:{tenantId:string;workspaceId:string}):Promise<StoredAgent[]>{
+    const rows=await this.sql`SELECT * FROM atlas_agents WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY name`;
+    return rows.map(mapAgent);
+  }
+  async findScoped(scope:{tenantId:string;workspaceId:string},id:string):Promise<StoredAgent|null>{
+    const rows=await this.sql`SELECT * FROM atlas_agents WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
+    return rows[0]?mapAgent(rows[0]):null;
+  }
+}
+
+function mapAgent(row:any):StoredAgent{
+  return{id:row.id,tenantId:row.tenant_id,workspaceId:row.workspace_id,name:row.name,moduleId:row.module_id,description:row.description,tools:row.tools??[],scopes:row.scopes??[],riskPolicy:row.risk_policy??{},costBudgetDaily:Number(row.cost_budget_daily),modelPreference:row.model_preference??null,memoryScope:row.memory_scope,enabled:Boolean(row.enabled)};
+}
+
+export interface StoredWorkflowRun{
+  id:string;tenantId:string;workspaceId:string;workflowId:string;status:"pending"|"running"|"waiting_approval"|"completed"|"failed"|"dead_letter";
+  currentStepIndex:number;input:Record<string,unknown>;state:Record<string,unknown>;attemptCount:number;nextAttemptAt:string;initiatedBy:string;startedAt:string|null;finishedAt:string|null;lastError:string|null;
+}
+
+export class WorkflowRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async createDefinition(scope:{tenantId:string;workspaceId:string},definition:WorkflowDefinition){
+    const id=definition.id||randomUUID();
+    await this.sql`INSERT INTO atlas_workflow_definitions(id,tenant_id,workspace_id,name,trigger_type,enabled,definition)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${definition.name},${definition.trigger},${definition.enabled},${JSON.stringify(definition)}::jsonb)
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,trigger_type=excluded.trigger_type,enabled=excluded.enabled,definition=excluded.definition,updated_at=now()`;
+    return id;
+  }
+  async findDefinition(scope:{tenantId:string;workspaceId:string},id:string):Promise<WorkflowDefinition|null>{
+    const rows=await this.sql`SELECT definition FROM atlas_workflow_definitions WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
+    return rows[0]?.definition as WorkflowDefinition??null;
+  }
+  async enqueue(scope:{tenantId:string;workspaceId:string},workflowId:string,input:Record<string,unknown>,initiatedBy:string){
+    const id=randomUUID();
+    await this.sql`INSERT INTO atlas_workflow_runs(id,tenant_id,workspace_id,workflow_id,status,input,state,initiated_by)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${workflowId},'pending',${JSON.stringify(input)}::jsonb,'{}'::jsonb,${initiatedBy})`;
+    return id;
+  }
+  async getRun(scope:{tenantId:string;workspaceId:string},id:string):Promise<StoredWorkflowRun|null>{
+    const rows=await this.sql`SELECT * FROM atlas_workflow_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
+    return rows[0]?mapRun(rows[0]):null;
+  }
+  async listRuns(scope:{tenantId:string;workspaceId:string},limit=50):Promise<StoredWorkflowRun[]>{
+    const safeLimit=Math.max(1,Math.min(200,Math.floor(limit)));
+    const rows=await this.sql`SELECT * FROM atlas_workflow_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY created_at DESC LIMIT ${safeLimit}`;
+    return rows.map(mapRun);
+  }
+  async claimNext():Promise<StoredWorkflowRun|null>{
+    return this.sql.begin(async tx=>{
+      const rows=await tx`SELECT * FROM atlas_workflow_runs WHERE status='pending' AND next_attempt_at<=now() ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1`;
+      const row=rows[0];if(!row)return null;
+      const updated=await tx`UPDATE atlas_workflow_runs SET status='running',started_at=COALESCE(started_at,now()),updated_at=now() WHERE id=${row.id} RETURNING *`;
+      return mapRun(updated[0]);
+    });
+  }
+  async updateRun(scope:{tenantId:string;workspaceId:string},id:string,input:{status?:StoredWorkflowRun["status"];currentStepIndex?:number;state?:Record<string,unknown>;attemptCount?:number;nextAttemptAt?:string;finished?:boolean;lastError?:string|null}){
+    const run=await this.getRun(scope,id);if(!run)return null;
+    const rows=await this.sql`UPDATE atlas_workflow_runs SET
+      status=${input.status??run.status},
+      current_step_index=${input.currentStepIndex??run.currentStepIndex},
+      state=${JSON.stringify(input.state??run.state)}::jsonb,
+      attempt_count=${input.attemptCount??run.attemptCount},
+      next_attempt_at=${input.nextAttemptAt??run.nextAttemptAt},
+      finished_at=CASE WHEN ${input.finished??false} THEN now() ELSE finished_at END,
+      last_error=${input.lastError===undefined?run.lastError:input.lastError},
+      updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} RETURNING *`;
+    return rows[0]?mapRun(rows[0]):null;
+  }
+  async getStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string){
+    const rows=await this.sql`SELECT * FROM atlas_workflow_step_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} AND step_id=${stepId} LIMIT 1`;
+    return rows[0]??null;
+  }
+  async beginStep(scope:{tenantId:string;workspaceId:string},runId:string,step:{id:string;kind:WorkflowStepKind},idempotencyKey:string){
+    const id=randomUUID();
+    const rows=await this.sql`INSERT INTO atlas_workflow_step_runs(id,tenant_id,workspace_id,run_id,step_id,kind,status,idempotency_key)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${runId},${step.id},${step.kind},'running',${idempotencyKey})
+      ON CONFLICT(run_id,step_id) DO UPDATE SET status='running',attempt_count=atlas_workflow_step_runs.attempt_count+1,error=NULL,started_at=now(),finished_at=NULL
+      RETURNING *`;
+    return rows[0];
+  }
+  async finishStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string,input:{status:"waiting"|"completed"|"failed";output?:Record<string,unknown>;error?:string|null}){
+    const rows=await this.sql`UPDATE atlas_workflow_step_runs SET status=${input.status},output=${JSON.stringify(input.output??{})}::jsonb,error=${input.error??null},finished_at=CASE WHEN ${input.status==="waiting"} THEN NULL ELSE now() END
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} AND step_id=${stepId} RETURNING *`;
+    return rows[0]??null;
+  }
+}
+
+function mapRun(row:any):StoredWorkflowRun{
+  return{id:row.id,tenantId:row.tenant_id,workspaceId:row.workspace_id,workflowId:row.workflow_id,status:row.status,currentStepIndex:Number(row.current_step_index),input:row.input??{},state:row.state??{},attemptCount:Number(row.attempt_count),nextAttemptAt:new Date(row.next_attempt_at).toISOString(),initiatedBy:row.initiated_by,startedAt:row.started_at?new Date(row.started_at).toISOString():null,finishedAt:row.finished_at?new Date(row.finished_at).toISOString():null,lastError:row.last_error??null};
 }
 
 export async function provisionWorkspace(sql:AtlasSql,input:{userId:string;workspaceName:string;verticalId:string;moduleIds:string[];planId?:string}){
