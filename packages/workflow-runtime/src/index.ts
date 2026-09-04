@@ -317,7 +317,7 @@ export class DurableWorkflowRuntime{
     if(step){
       const existing=await this.workflows.getStep(scope,run.id,step.id);
       if(existing?.status!=="completed"){
-        await this.workflows.beginStep(scope,run.id,step,idempotencyKey(run,step));
+        if(!existing)await this.workflows.beginStep(scope,run.id,step,idempotencyKey(run,step));
         await this.workflows.finishStep(scope,run.id,step.id,{status:"failed",error:message});
       }
     }
