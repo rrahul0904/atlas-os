@@ -1,0 +1,18 @@
+:root {
+  --atlas-bg: #0a0b10;
+  --atlas-panel: #12141c;
+  --atlas-panel-2: #191c27;
+  --atlas-text: #f7f8fb;
+  --atlas-muted: #9aa3b2;
+  --atlas-line: #2a2f3d;
+  --atlas-brand: #8b7cff;
+  --atlas-brand-strong: #6b5cff;
+  --atlas-success: #63d69f;
+  --atlas-danger: #ff7f87;
+  --atlas-warning: #f0c566;
+  --atlas-radius-sm: 8px;
+  --atlas-radius-md: 12px;
+  --atlas-radius-lg: 16px;
+  --atlas-shadow: 0 20px 70px rgba(0,0,0,.28);
+  --atlas-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
