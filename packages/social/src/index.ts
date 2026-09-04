@@ -1,0 +1,7 @@
+import {executeWorkflow,type WorkflowDefinition,type WorkflowRunResult} from '../../workflows/src/index.js';
+export type SocialChannel='instagram'|'facebook'|'linkedin'|'tiktok'|'pinterest'|'x';
+export type PostStatus='draft'|'approval'|'scheduled'|'published'|'failed';
+export interface SocialPost {id:string;channel:SocialChannel;title:string;copy:string;status:PostStatus;scheduledAt:string;campaignId:string;assetType:'image'|'video'|'carousel'|'text';impressions?:number;clicks?:number;conversions?:number;}
+export interface SocialCampaign {id:string;name:string;objective:string;status:'planning'|'approval'|'active'|'completed';channels:SocialChannel[];startAt:string;endAt:string;posts:number;spend?:number;revenue?:number;}
+export function socialWorkflow(campaignId:string):WorkflowDefinition{return{id:`social:${campaignId}`,name:'Social campaign execution',trigger:'campaign.approved',enabled:true,steps:[{id:'context',kind:'read',name:'Load brand and campaign context'},{id:'copy',kind:'ai',name:'Generate copy variants'},{id:'approve',kind:'approval',name:'Approve content'},{id:'publish',kind:'action',name:'Schedule/publish content'},{id:'measure',kind:'measure',name:'Measure results'}]};}
+export async function runSocialWorkflow(campaignId:string,workspaceId:string,approved=false):Promise<WorkflowRunResult>{return executeWorkflow(socialWorkflow(campaignId),{workspaceId,initiatedBy:'social',approvedStepIds:approved?['approve']:[]});}
