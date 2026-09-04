@@ -1,3 +1,5 @@
+ALTER TABLE atlas_workspaces ADD COLUMN IF NOT EXISTS approval_mode text NOT NULL DEFAULT 'BALANCED' CHECK (approval_mode IN ('SAFE_AUTOPILOT','BALANCED','APPROVAL_FIRST','MANUAL'));
+
 CREATE TABLE IF NOT EXISTS atlas_agents (
   id text PRIMARY KEY,
   tenant_id text NOT NULL REFERENCES atlas_tenants(id) ON DELETE CASCADE,
