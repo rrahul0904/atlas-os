@@ -7,10 +7,32 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: atlas_ci
+          POSTGRES_PASSWORD: atlas_ci
+          POSTGRES_DB: atlas_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U atlas_ci -d atlas_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PGPASSWORD: atlas_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm install --ignore-scripts
+      - name: Apply canonical PostgreSQL schema
+        run: psql -h 127.0.0.1 -U atlas_ci -d atlas_ci -v ON_ERROR_STOP=1 -f db/postgres.sql
+      - name: Verify tenancy tables
+        run: |
+          TABLES=$(psql -h 127.0.0.1 -U atlas_ci -d atlas_ci -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('atlas_tenants','atlas_users','atlas_workspaces','atlas_memberships','atlas_workspace_modules','atlas_tasks','atlas_approvals','atlas_events','atlas_audit_events')")
+          test "$TABLES" = "9"
       - run: npm run verify
