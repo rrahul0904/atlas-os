@@ -3,7 +3,8 @@ import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {dirname,resolve} from "node:path";
 import {renderDemo,renderIndex,type DemoId} from "./render.js";
-import {renderSignup,renderLogin,renderOnboarding,renderConnectedToday} from "./auth-pages.js";
+import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
+import {renderConnectedTodayView} from "./connected-today.js";
 import {db,databaseConfigured,dbHealth} from "../../../packages/db/src/index.js";
 import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
 import {hashPassword,verifyPassword,createSetupToken,verifySetupToken,createSession,verifySession} from "../../../packages/auth/src/index.js";
@@ -11,6 +12,9 @@ import {resetRegistry,getVertical} from "../../../packages/module-registry/src/i
 import {registerAtlasModules,registerAtlasVerticals} from "../../../packages/module-registry/src/catalog.js";
 import {intersectEnabledModules} from "../../../packages/entitlements/src/index.js";
 import type {AtlasRole,TenantPrincipal} from "../../../packages/tenancy/src/index.js";
+import {buildToday,createPersistenceTodayProvider} from "../../../packages/today/src/index.js";
+import {resolveWorkspaceContext} from "../../../packages/context/src/index.js";
+import {answerAtlas} from "../../../packages/ask-atlas/src/index.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -29,8 +33,22 @@ function cookies(req:IncomingMessage){
 function redirect(res:ServerResponse,location:string,setCookies?:string[]){res.writeHead(303,{location,...(setCookies?.length?{"set-cookie":setCookies}:{})});res.end();}
 function html(res:ServerResponse,body:string,status=200){res.writeHead(status,{"content-type":"text/html; charset=utf-8"});res.end(body);}
 function json(res:ServerResponse,payload:unknown,status=200){res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(payload));}
-function readBody(req:IncomingMessage):Promise<string>{return new Promise((resolveBody,reject)=>{const chunks:string[]=[];req.on("data",chunk=>chunks.push(typeof chunk==="string"?chunk:Buffer.from(chunk).toString("utf8")));req.on("end",()=>resolveBody(chunks.join("")));req.on("error",reject);});}
+function readBody(req:IncomingMessage,maxBytes=64*1024):Promise<string>{
+  return new Promise((resolveBody,reject)=>{
+    const chunks:string[]=[];let size=0;let failed=false;
+    req.on("data",chunk=>{
+      if(failed)return;
+      const text=typeof chunk==="string"?chunk:Buffer.from(chunk).toString("utf8");
+      size+=text.length;
+      if(size>maxBytes){failed=true;reject(new Error("request-body-too-large"));return;}
+      chunks.push(text);
+    });
+    req.on("end",()=>{if(!failed)resolveBody(chunks.join(""))});
+    req.on("error",reject);
+  });
+}
 async function form(req:IncomingMessage){return new URLSearchParams(await readBody(req));}
+async function jsonBody(req:IncomingMessage){const raw=await readBody(req);try{return JSON.parse(raw) as Record<string,unknown>}catch{throw new Error("invalid-json")}}
 function scopesForRole(role:AtlasRole):string[]{
   if(role==="owner")return["*"];
   if(role==="admin")return["today:read","business:read","business:write","agents:read","approvals:manage","integrations:read","integrations:write"];
@@ -92,7 +110,18 @@ createServer(async(req,res)=>{
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
       const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
-      html(res,renderConnectedToday({workspaceName:workspace.name,verticalId:workspace.verticalId,planId:workspace.planId,billingStatus:workspace.billingStatus,trialEndsAt:workspace.trialEndsAt,modules}));return;
+      const today=await buildToday({tenantId:principal.tenantId,workspaceId:principal.workspaceId},[createPersistenceTodayProvider(db())]);
+      html(res,renderConnectedTodayView({workspaceName:workspace.name,verticalId:workspace.verticalId,planId:workspace.planId,billingStatus:workspace.billingStatus,trialEndsAt:workspace.trialEndsAt,modules,today}));return;
+    }
+
+    if(path==="/api/atlas/ask"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){json(res,{status:"unauthorized",message:"Log in to ask this workspace."},401);return;}
+      const body=await jsonBody(req);const question=typeof body.question==="string"?body.question.trim():"";
+      if(!question||question.length>2000){json(res,{status:"invalid_request",message:"Question must be between 1 and 2000 characters."},400);return;}
+      const context=await resolveWorkspaceContext(db(),principal);
+      const answer=answerAtlas(context,question);
+      await new AuditRepository(db()).record({tenantId:principal.tenantId,workspaceId:principal.workspaceId},{actorId:principal.userId,action:"atlas.ask",targetType:"workspace",targetId:principal.workspaceId,metadata:{intent:answer.intent,evidenceCount:answer.evidence.length}});
+      json(res,answer);return;
     }
 
     res.writeHead(404,{"content-type":"text/plain"});res.end("Not found");
