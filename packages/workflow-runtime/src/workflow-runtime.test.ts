@@ -87,6 +87,9 @@ test("durable workflow governance lifecycle is certified in PostgreSQL",async()=
       ]
     };
     await workflows.createDefinition(scope,definition);
+    const storedDefinition=await workflows.findDefinition(scope,definition.id);
+    assert.ok(Boolean(storedDefinition),"workflow definition must round-trip in the same tenant/workspace");
+    assert.equal(storedDefinition?.enabled,true);
     const runId=await workflows.enqueue(scope,definition.id,{source:"test"},user.id);
     const simulation=new SimulatedToolExecutor();
     const runtime=new DurableWorkflowRuntime(sql,{executors:new ToolExecutorRegistry().register(simulation),retryDelaysMs:[0]});
