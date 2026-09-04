@@ -13,11 +13,13 @@ try{
   const found=new Set(rows.map(row=>row.table_name));
   const missing=required.filter(name=>!found.has(name));
   if(missing.length) throw new Error(`Missing AtlasOS tables: ${missing.join(", ")}`);
+  const integrationColumns=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_integration_connections' AND column_name IN ('last_success_at','last_error','last_error_at','health_details')`;
+  if(integrationColumns.length!==4) throw new Error("Missing integration health columns");
   const approvalMode=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_workspaces' AND column_name='approval_mode'`;
   if(!approvalMode.length) throw new Error("Missing atlas_workspaces.approval_mode");
   const migrations=await sql`SELECT count(*)::int AS count FROM atlas_schema_migrations`;
-  if(Number(migrations[0]?.count)!==6) throw new Error(`Expected 6 migrations, found ${migrations[0]?.count ?? 0}`);
-  console.log(`Database contract OK: ${required.length} tables, 6 migrations.`);
+  if(Number(migrations[0]?.count)!==7) throw new Error(`Expected 7 migrations, found ${migrations[0]?.count ?? 0}`);
+  console.log(`Database contract OK: ${required.length} tables, 7 migrations.`);
 }finally{
   await sql.end({timeout:2});
 }

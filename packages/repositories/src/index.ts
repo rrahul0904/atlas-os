@@ -4,6 +4,7 @@ import type {AtlasSql} from "../../db/src/index.js";
 import type {EvidenceRecord,EvidenceSourceType} from "../../evidence/src/index.js";
 import type {BusinessActionItem,ActionSeverity,ActionMode,ActionStatus} from "../../action-center/src/index.js";
 import type {WorkflowDefinition,WorkflowStepKind} from "../../workflows/src/index.js";
+import type {IntegrationHealth,IntegrationState} from "../../integrations-sdk/src/index.js";
 
 export interface StoredUser{id:string;email:string;displayName:string|null;passwordHash:string|null;createdAt:string}
 export interface StoredWorkspace{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string;approvalMode:"SAFE_AUTOPILOT"|"BALANCED"|"APPROVAL_FIRST"|"MANUAL";trialEndsAt:string|null;createdAt:string}
@@ -192,6 +193,124 @@ export class ActionItemRepository{
       FROM atlas_action_items WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND status IN ('open','in_progress','waiting_approval')
       ORDER BY CASE severity WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 ELSE 1 END DESC, created_at ASC LIMIT ${safeLimit}`;
     return rows.map(r=>({id:r.id,tenantId:r.tenant_id,workspaceId:r.workspace_id,sourceModule:r.source_module,entity:r.entity_type&&r.entity_id?{type:r.entity_type,id:r.entity_id}:undefined,title:r.title,description:r.description,severity:r.severity as ActionSeverity,businessImpact:r.business_impact,evidenceIds:r.evidence_ids??[],recommendedAction:r.recommended_action,risk:r.risk,approvalPolicy:r.approval_policy as ActionMode,status:r.status as ActionStatus,createdAt:new Date(r.created_at).toISOString()}));
+  }
+}
+
+export interface StoredIntegrationConnection{
+  id:string;
+  tenantId:string;
+  workspaceId:string;
+  integrationId:string;
+  status:IntegrationState;
+  externalAccountRef:string|null;
+  secretReference:string|null;
+  config:Record<string,unknown>;
+  lastHealthAt:string|null;
+  lastSuccessAt:string|null;
+  lastError:string|null;
+  lastErrorAt:string|null;
+  healthDetails:Record<string,unknown>;
+}
+
+function validIntegrationState(value:string):value is IntegrationState{
+  return ["connected","degraded","not_configured","error","needs_reauthentication"].includes(value);
+}
+
+function jsonObject(value:unknown):Record<string,unknown>{
+  if(value&&typeof value==="object"&&!Array.isArray(value))return value as Record<string,unknown>;
+  if(typeof value==="string"){
+    try{
+      const parsed=JSON.parse(value);
+      if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed))return parsed as Record<string,unknown>;
+    }catch{}
+  }
+  return{};
+}
+
+function mapIntegration(row:any):StoredIntegrationConnection{
+  const state=String(row.status);
+  return{
+    id:row.id,
+    tenantId:row.tenant_id,
+    workspaceId:row.workspace_id,
+    integrationId:row.integration_id,
+    status:validIntegrationState(state)?state:"error",
+    externalAccountRef:row.external_account_ref??null,
+    secretReference:row.secret_reference??null,
+    config:jsonObject(row.config),
+    lastHealthAt:row.last_health_at?new Date(row.last_health_at).toISOString():null,
+    lastSuccessAt:row.last_success_at?new Date(row.last_success_at).toISOString():null,
+    lastError:row.last_error??null,
+    lastErrorAt:row.last_error_at?new Date(row.last_error_at).toISOString():null,
+    healthDetails:jsonObject(row.health_details)
+  };
+}
+
+export class IntegrationConnectionRepository{
+  constructor(private readonly sql:AtlasSql){}
+
+  async upsert(scope:{tenantId:string;workspaceId:string},input:{
+    integrationId:string;
+    status?:IntegrationState;
+    externalAccountRef?:string|null;
+    secretReference?:string|null;
+    config?:Record<string,unknown>;
+  }):Promise<StoredIntegrationConnection>{
+    const id=randomUUID();
+    const status=input.status??"not_configured";
+    if(!validIntegrationState(status))throw new Error("invalid-integration-state");
+    const rows=await this.sql`INSERT INTO atlas_integration_connections(
+      id,tenant_id,workspace_id,integration_id,status,external_account_ref,secret_reference,config
+    ) VALUES(
+      ${id},${scope.tenantId},${scope.workspaceId},${input.integrationId},${status},
+      ${input.externalAccountRef??null},${input.secretReference??null},${JSON.stringify(input.config??{})}::jsonb
+    )
+    ON CONFLICT(workspace_id,integration_id) DO UPDATE SET
+      status=excluded.status,
+      external_account_ref=excluded.external_account_ref,
+      secret_reference=excluded.secret_reference,
+      config=excluded.config,
+      updated_at=now()
+    WHERE atlas_integration_connections.tenant_id=excluded.tenant_id
+    RETURNING *`;
+    if(!rows[0])throw new Error("integration-scope-conflict");
+    return mapIntegration(rows[0]);
+  }
+
+  async list(scope:{tenantId:string;workspaceId:string}):Promise<StoredIntegrationConnection[]>{
+    const rows=await this.sql`SELECT * FROM atlas_integration_connections
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+      ORDER BY integration_id`;
+    return rows.map(mapIntegration);
+  }
+
+  async findScoped(scope:{tenantId:string;workspaceId:string},id:string):Promise<StoredIntegrationConnection|null>{
+    const rows=await this.sql`SELECT * FROM atlas_integration_connections
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
+    return rows[0]?mapIntegration(rows[0]):null;
+  }
+
+  async findByIntegration(scope:{tenantId:string;workspaceId:string},integrationId:string):Promise<StoredIntegrationConnection|null>{
+    const rows=await this.sql`SELECT * FROM atlas_integration_connections
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND integration_id=${integrationId} LIMIT 1`;
+    return rows[0]?mapIntegration(rows[0]):null;
+  }
+
+  async updateHealth(scope:{tenantId:string;workspaceId:string},id:string,health:IntegrationHealth):Promise<StoredIntegrationConnection|null>{
+    if(!validIntegrationState(health.state))throw new Error("invalid-integration-state");
+    const success=health.state==="connected";
+    const hasError=health.state==="error"||health.state==="degraded"||health.state==="needs_reauthentication";
+    const rows=await this.sql`UPDATE atlas_integration_connections SET
+      status=${health.state},
+      last_health_at=${health.checkedAt},
+      last_success_at=CASE WHEN ${success} THEN ${health.checkedAt} ELSE last_success_at END,
+      last_error=CASE WHEN ${hasError} THEN ${health.message??health.state} ELSE NULL END,
+      last_error_at=CASE WHEN ${hasError} THEN ${health.checkedAt} ELSE last_error_at END,
+      health_details=${JSON.stringify(health.details??{})}::jsonb,
+      updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id}
+      RETURNING *`;
+    return rows[0]?mapIntegration(rows[0]):null;
   }
 }
 
