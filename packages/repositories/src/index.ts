@@ -236,14 +236,20 @@ export class WorkflowRepository{
   constructor(private readonly sql:AtlasSql){}
   async createDefinition(scope:{tenantId:string;workspaceId:string},definition:WorkflowDefinition){
     const id=definition.id||randomUUID();
-    await this.sql`INSERT INTO atlas_workflow_definitions(id,tenant_id,workspace_id,name,trigger_type,enabled,definition)
+    const rows=await this.sql`INSERT INTO atlas_workflow_definitions(id,tenant_id,workspace_id,name,trigger_type,enabled,definition)
       VALUES(${id},${scope.tenantId},${scope.workspaceId},${definition.name},${definition.trigger},${definition.enabled},${JSON.stringify(definition)}::jsonb)
-      ON CONFLICT(id) DO UPDATE SET name=excluded.name,trigger_type=excluded.trigger_type,enabled=excluded.enabled,definition=excluded.definition,updated_at=now()`;
-    return id;
+      ON CONFLICT(id) DO UPDATE SET name=excluded.name,trigger_type=excluded.trigger_type,enabled=excluded.enabled,definition=excluded.definition,updated_at=now()
+      WHERE atlas_workflow_definitions.tenant_id=excluded.tenant_id AND atlas_workflow_definitions.workspace_id=excluded.workspace_id
+      RETURNING id`;
+    if(!rows[0])throw new Error("workflow-id-conflict");
+    return rows[0].id as string;
   }
   async findDefinition(scope:{tenantId:string;workspaceId:string},id:string):Promise<WorkflowDefinition|null>{
     const rows=await this.sql`SELECT definition FROM atlas_workflow_definitions WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
     return rows[0]?.definition as WorkflowDefinition??null;
+  }
+  async listDefinitions(scope:{tenantId:string;workspaceId:string}){
+    return this.sql`SELECT id,name,trigger_type,enabled,definition,created_at,updated_at FROM atlas_workflow_definitions WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY name`;
   }
   async enqueue(scope:{tenantId:string;workspaceId:string},workflowId:string,input:Record<string,unknown>,initiatedBy:string){
     const id=randomUUID();
