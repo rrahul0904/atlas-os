@@ -1,0 +1,24 @@
+{
+  "name": "atlas-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-native business operating system — Observe, Understand, Decide, Act, Automate, Learn.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/packages/domain/src/domain.test.js dist/packages/module-registry/src/module-registry.test.js dist/packages/agent-governance/src/agent-governance.test.js dist/packages/founder/src/founder.test.js dist/packages/business-ops/src/business-ops.test.js dist/packages/executive/src/executive.test.js dist/packages/revenue-intelligence/src/revenue.test.js dist/packages/action-center/src/action-center.test.js",
+    "demo": "node dist/apps/demo/src/index.js",
+    "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}
