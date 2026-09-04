@@ -153,7 +153,7 @@ function assertHeaderName(name:string){
   if(!/^[A-Za-z0-9-]{1,64}$/.test(name))throw new Error("invalid-auth-header-name");
 }
 
-function parseConfig(config:WebhookConfig){
+export function validateWebhookConfiguration(config:WebhookConfig){
   const timeoutMs=Math.max(250,Math.min(30_000,Math.floor(config.timeoutMs??8_000)));
   const maxRequestBytes=Math.max(256,Math.min(256*1024,Math.floor(config.maxRequestBytes??64*1024)));
   const maxResponseBytes=Math.max(256,Math.min(512*1024,Math.floor(config.maxResponseBytes??128*1024)));
@@ -169,11 +169,15 @@ function parseConfig(config:WebhookConfig){
   const allowedHosts=new Set(config.allowedHosts.map(normalizeHost));
   if(!allowedHosts.has(normalizeHost(base.hostname)))throw new Error("webhook-base-host-not-allowlisted");
   if(config.authHeaderName)assertHeaderName(config.authHeaderName);
+  for(const path of config.allowedPaths){
+    if(!path.startsWith("/")||path.includes("..")||path.includes("\\"))throw new Error("invalid-webhook-path");
+  }
+  if(config.healthPath&&(!config.healthPath.startsWith("/")||config.healthPath.includes("..")||config.healthPath.includes("\\")))throw new Error("invalid-webhook-health-path");
   return{base,allowedHosts,timeoutMs,maxRequestBytes,maxResponseBytes};
 }
 
 async function validateHost(url:URL,config:WebhookConfig,resolver:HostResolver){
-  const parsed=parseConfig(config);
+  const parsed=validateWebhookConfiguration(config);
   if(!parsed.allowedHosts.has(normalizeHost(url.hostname)))throw new Error("webhook-host-not-allowlisted");
   const addresses=await resolver(url.hostname);
   if(!addresses.length)throw new Error("webhook-host-unresolved");
@@ -229,7 +233,7 @@ export class WebhookIntegrationAdapter implements IntegrationAdapter<WebhookConf
   async health(context:IntegrationContext,config:WebhookConfig):Promise<IntegrationHealth>{
     const checkedAt=new Date().toISOString();
     try{
-      const parsed=parseConfig(config);
+      const parsed=validateWebhookConfiguration(config);
       await validateHost(parsed.base,config,this.resolver);
       if(!config.healthPath){
         return{state:"degraded",message:"Configuration is safe; no active health path is configured.",checkedAt,details:{connectionId:context.connectionId}};
@@ -256,7 +260,7 @@ export class WebhookIntegrationAdapter implements IntegrationAdapter<WebhookConf
     const path=typeof input.path==="string"?input.path:"";
     const url=endpoint(config,path);
     await validateHost(url,config,this.resolver);
-    const parsed=parseConfig(config);
+    const parsed=validateWebhookConfiguration(config);
     const bodyValue=input.body??{};
     const body=JSON.stringify(bodyValue);
     if(new TextEncoder().encode(body).byteLength>parsed.maxRequestBytes)throw new Error("webhook-request-too-large");
