@@ -6,7 +6,7 @@ import type {BusinessActionItem,ActionSeverity,ActionMode,ActionStatus} from "..
 import type {WorkflowDefinition,WorkflowStepKind} from "../../workflows/src/index.js";
 
 export interface StoredUser{id:string;email:string;displayName:string|null;passwordHash:string|null;createdAt:string}
-export interface StoredWorkspace{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string;trialEndsAt:string|null;createdAt:string}
+export interface StoredWorkspace{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string;approvalMode:"SAFE_AUTOPILOT"|"BALANCED"|"APPROVAL_FIRST"|"MANUAL";trialEndsAt:string|null;createdAt:string}
 export interface StoredMembership{workspaceId:string;tenantId:string;userId:string;role:AtlasRole;status:string}
 
 export class UserRepository{
@@ -45,15 +45,19 @@ export class WorkspaceRepository{
     const rows=await this.sql`
       INSERT INTO atlas_workspaces(id,tenant_id,name,vertical_id,plan_id,billing_status,trial_ends_at)
       VALUES(${id},${input.tenantId},${input.name},${input.verticalId},${planId},'trialing',now()+${trialDays}*interval '1 day')
-      RETURNING id,tenant_id,name,vertical_id,plan_id,billing_status,trial_ends_at,created_at
+      RETURNING id,tenant_id,name,vertical_id,plan_id,billing_status,approval_mode,trial_ends_at,created_at
     `;
     const r=rows[0];
-    return{id:r.id,tenantId:r.tenant_id,name:r.name,verticalId:r.vertical_id,planId:r.plan_id,billingStatus:r.billing_status,trialEndsAt:r.trial_ends_at?new Date(r.trial_ends_at).toISOString():null,createdAt:new Date(r.created_at).toISOString()};
+    return{id:r.id,tenantId:r.tenant_id,name:r.name,verticalId:r.vertical_id,planId:r.plan_id,billingStatus:r.billing_status,approvalMode:r.approval_mode,trialEndsAt:r.trial_ends_at?new Date(r.trial_ends_at).toISOString():null,createdAt:new Date(r.created_at).toISOString()};
   }
   async findScoped(tenantId:string,workspaceId:string):Promise<StoredWorkspace|null>{
-    const rows=await this.sql`SELECT id,tenant_id,name,vertical_id,plan_id,billing_status,trial_ends_at,created_at FROM atlas_workspaces WHERE tenant_id=${tenantId} AND id=${workspaceId} LIMIT 1`;
+    const rows=await this.sql`SELECT id,tenant_id,name,vertical_id,plan_id,billing_status,approval_mode,trial_ends_at,created_at FROM atlas_workspaces WHERE tenant_id=${tenantId} AND id=${workspaceId} LIMIT 1`;
     const r=rows[0];if(!r)return null;
-    return{id:r.id,tenantId:r.tenant_id,name:r.name,verticalId:r.vertical_id,planId:r.plan_id,billingStatus:r.billing_status,trialEndsAt:r.trial_ends_at?new Date(r.trial_ends_at).toISOString():null,createdAt:new Date(r.created_at).toISOString()};
+    return{id:r.id,tenantId:r.tenant_id,name:r.name,verticalId:r.vertical_id,planId:r.plan_id,billingStatus:r.billing_status,approvalMode:r.approval_mode,trialEndsAt:r.trial_ends_at?new Date(r.trial_ends_at).toISOString():null,createdAt:new Date(r.created_at).toISOString()};
+  }
+  async setApprovalMode(tenantId:string,workspaceId:string,approvalMode:StoredWorkspace["approvalMode"]){
+    const rows=await this.sql`UPDATE atlas_workspaces SET approval_mode=${approvalMode} WHERE tenant_id=${tenantId} AND id=${workspaceId} RETURNING id`;
+    return Boolean(rows[0]);
   }
 }
 
@@ -111,6 +115,10 @@ export class ApprovalRepository{
     const rows=await this.sql`SELECT * FROM atlas_approvals WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
     return rows[0]??null;
   }
+  async findForRunStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string){
+    const rows=await this.sql`SELECT * FROM atlas_approvals WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND workflow_run_id=${runId} AND workflow_step_id=${stepId} ORDER BY requested_at DESC LIMIT 1`;
+    return rows[0]??null;
+  }
   async resolve(scope:{tenantId:string;workspaceId:string},id:string,input:{decision:"approved"|"rejected";resolvedBy:string;note?:string}){
     const rows=await this.sql`UPDATE atlas_approvals SET status=${input.decision},resolved_by=${input.resolvedBy},resolution_note=${input.note??null},resolved_at=now()
       WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} AND status='pending' RETURNING *`;
@@ -124,6 +132,10 @@ export class AuditRepository{
     const id=randomUUID();
     await this.sql`INSERT INTO atlas_audit_events(id,tenant_id,workspace_id,actor_id,action,target_type,target_id,metadata) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.actorId??null},${input.action},${input.targetType??null},${input.targetId??null},${JSON.stringify(input.metadata??{})}::jsonb)`;
     return id;
+  }
+  async listRecent(scope:{tenantId:string;workspaceId:string},limit=100){
+    const safeLimit=Math.max(1,Math.min(500,Math.floor(limit)));
+    return this.sql`SELECT id,actor_id,action,target_type,target_id,metadata,occurred_at FROM atlas_audit_events WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY occurred_at DESC LIMIT ${safeLimit}`;
   }
 }
 
@@ -201,6 +213,10 @@ export class AgentRepository{
     const rows=await this.sql`SELECT * FROM atlas_agents WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY name`;
     return rows.map(mapAgent);
   }
+  async setEnabled(scope:{tenantId:string;workspaceId:string},id:string,enabled:boolean):Promise<boolean>{
+    const rows=await this.sql`UPDATE atlas_agents SET enabled=${enabled},updated_at=now() WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} RETURNING id`;
+    return Boolean(rows[0]);
+  }
   async findScoped(scope:{tenantId:string;workspaceId:string},id:string):Promise<StoredAgent|null>{
     const rows=await this.sql`SELECT * FROM atlas_agents WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
     return rows[0]?mapAgent(rows[0]):null;
@@ -274,9 +290,17 @@ export class WorkflowRepository{
     const id=randomUUID();
     const rows=await this.sql`INSERT INTO atlas_workflow_step_runs(id,tenant_id,workspace_id,run_id,step_id,kind,status,idempotency_key)
       VALUES(${id},${scope.tenantId},${scope.workspaceId},${runId},${step.id},${step.kind},'running',${idempotencyKey})
-      ON CONFLICT(run_id,step_id) DO UPDATE SET status='running',attempt_count=atlas_workflow_step_runs.attempt_count+1,error=NULL,started_at=now(),finished_at=NULL
+      ON CONFLICT(run_id,step_id) DO UPDATE SET
+        status=CASE WHEN atlas_workflow_step_runs.status='completed' THEN 'completed' ELSE 'running' END,
+        attempt_count=CASE WHEN atlas_workflow_step_runs.status='completed' THEN atlas_workflow_step_runs.attempt_count ELSE atlas_workflow_step_runs.attempt_count+1 END,
+        error=CASE WHEN atlas_workflow_step_runs.status='completed' THEN atlas_workflow_step_runs.error ELSE NULL END,
+        started_at=CASE WHEN atlas_workflow_step_runs.status='completed' THEN atlas_workflow_step_runs.started_at ELSE now() END,
+        finished_at=CASE WHEN atlas_workflow_step_runs.status='completed' THEN atlas_workflow_step_runs.finished_at ELSE NULL END
       RETURNING *`;
     return rows[0];
+  }
+  async listSteps(scope:{tenantId:string;workspaceId:string},runId:string){
+    return this.sql`SELECT * FROM atlas_workflow_step_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} ORDER BY started_at,step_id`;
   }
   async finishStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string,input:{status:"waiting"|"completed"|"failed";output?:Record<string,unknown>;error?:string|null}){
     const rows=await this.sql`UPDATE atlas_workflow_step_runs SET status=${input.status},output=${JSON.stringify(input.output??{})}::jsonb,error=${input.error??null},finished_at=CASE WHEN ${input.status==="waiting"} THEN NULL ELSE now() END
