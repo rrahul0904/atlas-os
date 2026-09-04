@@ -50,7 +50,9 @@ class AmbiguousExecutor implements ToolExecutor{
 
 class AlwaysRetryExecutor implements ToolExecutor{
   connector="always-retry";
-  async execute(){throw new WorkflowRuntimeError("retryable","temporary-provider-failure");}
+  async execute(_tool:ToolDefinition,_input:Record<string,unknown>,_context:ToolExecutionContext):Promise<Record<string,unknown>>{
+    throw new WorkflowRuntimeError("retryable","temporary-provider-failure");
+  }
 }
 
 test("durable workflow governance lifecycle is certified in PostgreSQL",async()=>{
@@ -132,6 +134,7 @@ test("durable workflow governance lifecycle is certified in PostgreSQL",async()=
     await runtime.processNext();
     const rejectApproval=(await approvals.listPending(scope)).find((row:any)=>row.workflow_run_id===rejectRun);
     assert.ok(Boolean(rejectApproval));
+    if(!rejectApproval)throw new Error("reject-approval-not-created");
     await resolveWorkflowApproval(sql,{userId:user.id,tenantId:scope.tenantId,workspaceId:scope.workspaceId,role:"owner",scopes:["*"]},rejectApproval.id,"rejected");
     assert.equal((await workflows.getRun(scope,rejectRun))?.status,"failed");
 
