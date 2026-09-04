@@ -103,7 +103,7 @@ export class AuditRepository{
   constructor(private readonly sql:AtlasSql){}
   async record(scope:{tenantId:string;workspaceId:string},input:{actorId?:string;action:string;targetType?:string;targetId?:string;metadata?:Record<string,unknown>}){
     const id=randomUUID();
-    await this.sql`INSERT INTO atlas_audit_events(id,tenant_id,workspace_id,actor_id,action,target_type,target_id,metadata) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.actorId??null},${input.action},${input.targetType??null},${input.targetId??null},${this.sql.json(input.metadata??{})})`;
+    await this.sql`INSERT INTO atlas_audit_events(id,tenant_id,workspace_id,actor_id,action,target_type,target_id,metadata) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.actorId??null},${input.action},${input.targetType??null},${input.targetId??null},${JSON.stringify(input.metadata??{})}::jsonb)`;
     return id;
   }
 }
@@ -112,7 +112,7 @@ export class EventRepository{
   constructor(private readonly sql:AtlasSql){}
   async record(scope:{tenantId:string;workspaceId:string},input:{module:string;type:string;entityType?:string;entityId?:string;properties?:Record<string,unknown>;occurredAt?:string}){
     const id=randomUUID();
-    await this.sql`INSERT INTO atlas_events(id,tenant_id,workspace_id,module,type,entity_type,entity_id,properties,occurred_at) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.module},${input.type},${input.entityType??null},${input.entityId??null},${this.sql.json(input.properties??{})},${input.occurredAt??new Date().toISOString()})`;
+    await this.sql`INSERT INTO atlas_events(id,tenant_id,workspace_id,module,type,entity_type,entity_id,properties,occurred_at) VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.module},${input.type},${input.entityType??null},${input.entityId??null},${JSON.stringify(input.properties??{})}::jsonb,${input.occurredAt??new Date().toISOString()})`;
     return id;
   }
 }
