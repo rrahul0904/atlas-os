@@ -11,8 +11,11 @@
     "test": "node --test dist/packages/*/src/*.test.js dist/apps/web/src/*.test.js",
     "demo": "node dist/apps/demo/src/index.js",
     "start:web": "node dist/apps/web/src/server.js",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:check": "node scripts/db-check.mjs",
     "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo"
   },
   "engines": {"node":"22.x"},
+  "dependencies": {"postgres":"^3.4.7"},
   "devDependencies": {"@types/node":"^22.15.0","typescript":"^5.8.3"}
 }

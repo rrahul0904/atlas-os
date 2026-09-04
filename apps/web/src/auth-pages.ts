@@ -1,0 +1,26 @@
+const esc=(value:string)=>value.replace(/[&<>"\']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","\'":"&#39;"}[char]??char));
+
+function authShell(title:string,body:string){
+  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AtlasOS · '+esc(title)+'</title><link rel="stylesheet" href="/assets/atlas.css"></head><body class="auth-page"><main class="auth-card"><a class="auth-brand" href="/">AtlasOS</a>'+body+'</main></body></html>';
+}
+
+export function renderSignup(error?:string){
+  const message=error?'<div class="form-error">'+esc(error)+'</div>':"";
+  return authShell("Create account",'<small class="eyebrow">START ATLAS OS</small><h1>Create your account</h1><p>One workspace, one operating console, governed AI actions.</p>'+message+'<form method="post" action="/signup"><label>Name<input name="displayName" autocomplete="name" maxlength="100"></label><label>Email<input name="email" type="email" autocomplete="email" required maxlength="254"></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="10" required></label><button type="submit">Continue to workspace setup</button></form><p class="auth-foot">Already have an account? <a href="/login">Log in</a></p>');
+}
+
+export function renderLogin(error?:string){
+  const message=error?'<div class="form-error">'+esc(error)+'</div>':"";
+  return authShell("Log in",'<small class="eyebrow">WELCOME BACK</small><h1>Log in to AtlasOS</h1><p>Open the workspace that needs your attention.</p>'+message+'<form method="post" action="/login"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">Log in</button></form><p class="auth-foot">New to AtlasOS? <a href="/signup">Create account</a></p>');
+}
+
+export function renderOnboarding(input:{email:string;error?:string}){
+  const message=input.error?'<div class="form-error">'+esc(input.error)+'</div>':"";
+  return authShell("Set up workspace",'<small class="eyebrow">WORKSPACE SETUP</small><h1>What are you running?</h1><p>'+esc(input.email)+' · Your first workspace starts on a 14-day Business trial.</p>'+message+'<form method="post" action="/onboarding"><label>Workspace name<input name="workspaceName" required maxlength="100" placeholder="Acme, Bright Dental, My Startup…"></label><label>Business type<select name="vertical" required><option value="founder">Founder / startup</option><option value="ceo">Company CEO / executive</option><option value="dental">Dental practice</option><option value="contractor">Contractor / field service</option><option value="agency">Agency</option></select></label><button type="submit">Create workspace</button></form><p class="auth-foot">AtlasOS enables only the modules for the selected workspace and trial entitlement.</p>');
+}
+
+export function renderConnectedToday(input:{workspaceName:string;verticalId:string;planId:string;billingStatus:string;trialEndsAt:string|null;modules:string[]}){
+  const moduleList=input.modules.map(id=>'<li><b>'+esc(id)+'</b><span>Enabled</span></li>').join("");
+  const trial=input.trialEndsAt?' · Trial ends '+esc(new Date(input.trialEndsAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})):"";
+  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AtlasOS · Today</title><link rel="stylesheet" href="/assets/atlas.css"></head><body><div class="shell"><aside><div class="brand"><span>A</span><div><b>AtlasOS</b><small>'+esc(input.workspaceName)+'</small></div></div><nav><a class="nav-item active" href="/app/today">Today</a><a class="nav-item" href="/app/tasks">Tasks</a><a class="nav-item" href="/app/approvals">Approvals</a><a class="nav-item" href="/app/integrations">Integrations</a><a class="nav-item" href="/app/settings">Settings</a></nav><form method="post" action="/logout" class="logout"><button>Log out</button></form></aside><main><header><div><small class="eyebrow">CONNECTED / '+esc(input.verticalId.toUpperCase())+'</small><h1>Good morning.</h1><p>'+esc(input.workspaceName)+' · '+esc(input.planId)+' · '+esc(input.billingStatus)+trial+'</p></div></header><section class="grid"><div class="panel"><div class="panel-head"><h2>Start with real business data</h2><span>Connected mode</span></div><div class="empty-connected"><h3>No business signals yet</h3><p>AtlasOS will not substitute demo metrics here. Connect a tool or create a task to begin building your real Today view.</p><div class="empty-actions"><a href="/app/integrations">Connect integrations</a><a href="/app/tasks">Create a task</a></div></div></div><div class="panel"><div class="panel-head"><h2>Enabled modules</h2><span>'+String(input.modules.length)+'</span></div><ul class="module-list">'+moduleList+'</ul></div></section><section class="panel command"><small class="eyebrow">ASK YOUR BUSINESS</small><h2>Evidence-backed answers will appear here after integrations are connected.</h2><p>Connected Atlas never borrows data from /demo routes.</p></section></main></div></body></html>';
+}
