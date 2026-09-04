@@ -246,7 +246,12 @@ export class WorkflowRepository{
   }
   async findDefinition(scope:{tenantId:string;workspaceId:string},id:string):Promise<WorkflowDefinition|null>{
     const rows=await this.sql`SELECT definition FROM atlas_workflow_definitions WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;
-    return rows[0]?.definition as WorkflowDefinition??null;
+    const value=rows[0]?.definition;
+    if(!value)return null;
+    if(typeof value==="string"){
+      try{return JSON.parse(value) as WorkflowDefinition}catch{return null}
+    }
+    return value as WorkflowDefinition;
   }
   async listDefinitions(scope:{tenantId:string;workspaceId:string}){
     return this.sql`SELECT id,name,trigger_type,enabled,definition,created_at,updated_at FROM atlas_workflow_definitions WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY name`;
