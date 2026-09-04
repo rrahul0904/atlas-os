@@ -1,6 +1,6 @@
 import type {StoredIntegrationConnection} from "../../../packages/repositories/src/index.js";
 
-const esc=(value:string)=>value.replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]??char);
+const esc=(value:string)=>value.replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]??char));
 
 function statusLabel(status:string){
   return status.replaceAll("_"," ");
