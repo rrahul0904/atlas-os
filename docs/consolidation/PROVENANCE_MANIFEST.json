@@ -1,0 +1,17 @@
+{
+  "capturedAt": "2026-09-04",
+  "sources": [
+    {"repository":"rrahul0904/founderos-ai","branch":"main","sha":"88629f95b578378a404f2dd7bebf3396bb42de0e","atlasBranch":"source/founderos-ai"},
+    {"repository":"rrahul0904/pulseatlas","branch":"main","sha":"2c3f303809d70ecd0b68e8eddf0e5cb3ef3c4e4a","atlasBranch":"source/pulseatlas"},
+    {"repository":"rrahul0904/contractoros-ai","branch":"main","sha":"dfbc58414209d470eb59297678a8f954f27449ed","atlasBranch":"source/contractoros-ai"},
+    {"repository":"rrahul0904/programos-ai","branch":"main","sha":"076345674fda9254eaa081e9083ab361b02e1bab","atlasBranch":"source/programos-ai"},
+    {"repository":"rrahul0904/agent-control-plane","branch":"main","sha":"44e51e3da3d13482e902211d69cf6c1bc5ac3987","atlasBranch":"source/agent-control-plane"},
+    {"repository":"rrahul0904/intent-revenue-os","branch":"main","sha":"5288f3ceba32ef9fd61bdaf842cefe76045277de","atlasBranch":"source/intent-revenue-os"},
+    {"repository":"rrahul0904/tractionmesh","branch":"main","sha":"aac3fbbf0a085c2041c1a1ea716e799bec8ea4e1","atlasBranch":"source/tractionmesh"},
+    {"repository":"rrahul0904/social-growth-os","branch":"main","sha":"c239ab2123c664ed871f6cc3505492ae342103c6","atlasBranch":"source/social-growth-os"},
+    {"repository":"rrahul0904/launchgrid","branch":"main","sha":"d614f57f87b64c9435bb7e1346dce1afb2b9a32e","atlasBranch":"source/launchgrid"},
+    {"repository":"rrahul0904/outbound-infrastructure-os","branch":"main","sha":"ea1c6fb0d3d22ef46448e8ae18506bae26356e26","atlasBranch":"source/outbound-infrastructure-os"},
+    {"repository":"rrahul0904/sessiongrid","branch":"main","sha":"947a55ee2010e79c8e3a72bb98e91ecd6fa8d336","atlasBranch":"source/sessiongrid"},
+    {"repository":"rrahul0904/vibe-saas-foundry","branch":"main","sha":"e3cf0624ee6c36e6b847140812dddbafb2f3949b","atlasBranch":"source/vibe-saas-foundry"}
+  ]
+}

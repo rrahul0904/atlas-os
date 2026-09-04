@@ -1,0 +1,1 @@
+{"id":"inventory-reorder","sourceRepository":"rrahul0904/n8n-automated-inventory-reorder-vendor-notification-pipeline","sourceBranch":"source/automation-inventory-reorder","status":"legacy-recipe","trigger":"schedule","integrations":["Google Sheets","Slack","Gmail"],"approvalPolicy":"reorder is proposed first; authoritative approval required before vendor notification"}

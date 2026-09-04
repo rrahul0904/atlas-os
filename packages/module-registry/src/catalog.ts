@@ -1,0 +1,24 @@
+import {defineModule,defineVertical} from"./index.js";
+
+export function registerAtlasModules(){
+  defineModule({id:"today",name:"Today",state:"native",sourceRepository:"atlas-os",description:"Cross-module action center",permissions:["today:read"],eventTypes:["action.created","decision.required"]});
+  defineModule({id:"founder",name:"Founder Intelligence",state:"adapted",sourceRepository:"rrahul0904/founderos-ai",description:"Idea → evidence → decision → build → deploy → learn",permissions:["founder:read","founder:write"],eventTypes:["founder.project.created","founder.decision.approved"]});
+  defineModule({id:"observability",name:"Portfolio Observability",state:"adapted",sourceRepository:"rrahul0904/pulseatlas",description:"Privacy-safe portfolio health, money, engineering and Live Earth",permissions:["observability:read"],eventTypes:["telemetry.received","alert.fired"]});
+  defineModule({id:"agent-governance",name:"Agent Governance",state:"adapted",sourceRepository:"rrahul0904/agent-control-plane",description:"Policy, approvals, budgets, tools and audit",permissions:["agents:read","agents:execute","approvals:manage"],eventTypes:["agent.action.requested","approval.required","agent.action.executed"]});
+  defineModule({id:"business-ops",name:"Business Operations",state:"adapted",sourceRepository:"rrahul0904/contractoros-ai",description:"Customers, leads, quotes, work, invoices, payments, reviews and goals",permissions:["business:read","business:write"],eventTypes:["lead.created","invoice.overdue","payment.received"]});
+  defineModule({id:"executive",name:"Executive Intelligence",state:"adapted",sourceRepository:"rrahul0904/programos-ai",description:"Health, risk, EVM, forecasts, scenarios and steering evidence",permissions:["executive:read"],eventTypes:["program.health.changed","risk.changed"]});
+  defineModule({id:"revenue-intelligence",name:"Revenue Intelligence",state:"adapted",sourceRepository:"rrahul0904/intent-revenue-os",description:"Intent discovery, evidence scoring, opportunity queue and attribution",permissions:["revenue:read","revenue:write"],eventTypes:["opportunity.scored","opportunity.won"]});
+  defineModule({id:"growth",name:"Growth Intelligence",state:"adapted",sourceRepository:"rrahul0904/tractionmesh",description:"Growth Brain, campaigns, opportunities and attribution",permissions:["growth:read","growth:write"],eventTypes:["campaign.created","conversion.attributed"]});
+  defineModule({id:"social",name:"Social Operations",state:"adapted",sourceRepository:"rrahul0904/social-growth-os",description:"Content planning, approval, publishing and closed-loop measurement",permissions:["social:read","social:write"],eventTypes:["content.approved","content.published"]});
+  defineModule({id:"launch",name:"Launch & Distribution",state:"adapted",sourceRepository:"rrahul0904/launchgrid",description:"Launch windows, outreach, distribution and analytics",permissions:["launch:read","launch:write"],eventTypes:["launch.started","submission.completed"]});
+  defineModule({id:"outbound",name:"Outbound Infrastructure",state:"adapted",sourceRepository:"rrahul0904/outbound-infrastructure-os",description:"Domains, sender health, verification, reputation and delivery",permissions:["outbound:read","outbound:write"],eventTypes:["sender.degraded","reply.received"]});
+  defineModule({id:"browser-runtime",name:"Browser Runtime",state:"adapted",sourceRepository:"rrahul0904/sessiongrid",description:"Authorized browser workspaces, policy-aware sessions and audit",permissions:["browser:read","browser:execute"],eventTypes:["session.started","session.stopped"]});
+  defineModule({id:"saas-foundation",name:"SaaS Foundation",state:"adapted",sourceRepository:"rrahul0904/vibe-saas-foundry",description:"Reference auth, admin, task and app-shell patterns",permissions:["platform:read"],eventTypes:[]});
+}
+export function registerAtlasVerticals(){
+  defineVertical({id:"founder",name:"FounderOS",modules:["today","founder","observability","revenue-intelligence","growth","launch","agent-governance"],terminology:{customer:"Customer",workItem:"Product initiative"}});
+  defineVertical({id:"ceo",name:"CEO OS",modules:["today","observability","executive","business-ops","revenue-intelligence","agent-governance"],terminology:{workItem:"Initiative",goal:"Company goal"}});
+  defineVertical({id:"dental",name:"Dental OS",modules:["today","business-ops","agent-governance"],terminology:{customer:"Patient",workItem:"Practice task",appointment:"Appointment"}});
+  defineVertical({id:"contractor",name:"Contractor OS",modules:["today","business-ops","agent-governance"],terminology:{customer:"Customer",workItem:"Job",resource:"Crew"}});
+  defineVertical({id:"agency",name:"Agency OS",modules:["today","business-ops","revenue-intelligence","growth","social","launch","outbound","agent-governance"],terminology:{customer:"Client",workItem:"Engagement"}});
+}
