@@ -21,6 +21,7 @@ import {answerAtlas} from "../../../packages/ask-atlas/src/index.js";
 import {seedDefaultAgents} from "../../../packages/agents/src/index.js";
 import {resolveWorkflowApproval} from "../../../packages/approvals/src/index.js";
 import {WebhookIntegrationAdapter,validateWebhookConfiguration,type WebhookConfig} from "../../../packages/integrations-webhook/src/index.js";
+import {canViewIntegrations,canManageIntegrations} from "./integration-permissions.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -126,7 +127,7 @@ createServer(async(req,res)=>{
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
       const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
       const agents=await seedDefaultAgents(db(),{tenantId:principal.tenantId,workspaceId:principal.workspaceId},workspace.verticalId,modules);
-      html(res,renderAgentsPage({workspaceName:workspace.name,agents,canManage:roleAtLeast(principal.role,"admin")}));return;
+      html(res,renderAgentsPage({workspaceName:workspace.name,agents,canManage:canManageIntegrations(principal.role)}));return;
     }
 
     const agentToggle=path.match(/^\/app\/agents\/([^/]+)\/toggle$/);
@@ -172,7 +173,7 @@ createServer(async(req,res)=>{
 
     if(path==="/app/integrations"&&method==="GET"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
-      if(!roleAtLeast(principal.role,"operator")){json(res,{status:"forbidden",message:"Operator role or higher is required to view integrations."},403);return;}
+      if(!canViewIntegrations(principal.role)){json(res,{status:"forbidden",message:"Operator role or higher is required to view integrations."},403);return;}
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);
       if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
       const connections=await new IntegrationConnectionRepository(db()).list({tenantId:principal.tenantId,workspaceId:principal.workspaceId});
@@ -181,7 +182,7 @@ createServer(async(req,res)=>{
 
     if(path==="/app/integrations/webhook/save"&&method==="POST"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
-      if(!roleAtLeast(principal.role,"admin")){json(res,{status:"forbidden",message:"Admin role is required to configure integrations."},403);return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to configure integrations."},403);return;}
       const data=await form(req);
       const baseUrl=(data.get("baseUrl")||"").trim();
       const allowedHosts=(data.get("allowedHosts")||"").split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean);
@@ -222,7 +223,7 @@ createServer(async(req,res)=>{
 
     if(path==="/app/integrations/webhook/check"&&method==="POST"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
-      if(!roleAtLeast(principal.role,"admin")){json(res,{status:"forbidden",message:"Admin role is required to check integration health."},403);return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to check integration health."},403);return;}
       const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
       const repository=new IntegrationConnectionRepository(db());
       const connection=await repository.findByIntegration(scope,"webhook");
