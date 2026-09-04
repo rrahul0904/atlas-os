@@ -1,8 +1,15 @@
 import {db,closeDb} from "../../../packages/db/src/index.js";
 import {DurableWorkflowRuntime,ToolExecutorRegistry,SimulatedToolExecutor} from "../../../packages/workflow-runtime/src/index.js";
+import {IntegrationAdapterRegistry} from "../../../packages/integrations-sdk/src/index.js";
+import {WebhookIntegrationAdapter} from "../../../packages/integrations-webhook/src/index.js";
+import {IntegrationToolExecutor} from "../../../packages/integration-runtime/src/index.js";
 
 const pollMs=Math.max(1000,Number(process.env.ATLAS_WORKER_POLL_MS||2000));
 const executors=new ToolExecutorRegistry();
+const integrationAdapters=new IntegrationAdapterRegistry()
+  .register(new WebhookIntegrationAdapter());
+
+executors.register(new IntegrationToolExecutor(db(),integrationAdapters,"webhook"));
 
 if(process.env.ATLAS_ENABLE_SIMULATION==="true"){
   if(process.env.NODE_ENV==="production")throw new Error("simulation-executor-forbidden-in-production");
