@@ -216,6 +216,17 @@ function validIntegrationState(value:string):value is IntegrationState{
   return ["connected","degraded","not_configured","error","needs_reauthentication"].includes(value);
 }
 
+function jsonObject(value:unknown):Record<string,unknown>{
+  if(value&&typeof value==="object"&&!Array.isArray(value))return value as Record<string,unknown>;
+  if(typeof value==="string"){
+    try{
+      const parsed=JSON.parse(value);
+      if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed))return parsed as Record<string,unknown>;
+    }catch{}
+  }
+  return{};
+}
+
 function mapIntegration(row:any):StoredIntegrationConnection{
   const state=String(row.status);
   return{
@@ -226,12 +237,12 @@ function mapIntegration(row:any):StoredIntegrationConnection{
     status:validIntegrationState(state)?state:"error",
     externalAccountRef:row.external_account_ref??null,
     secretReference:row.secret_reference??null,
-    config:row.config??{},
+    config:jsonObject(row.config),
     lastHealthAt:row.last_health_at?new Date(row.last_health_at).toISOString():null,
     lastSuccessAt:row.last_success_at?new Date(row.last_success_at).toISOString():null,
     lastError:row.last_error??null,
     lastErrorAt:row.last_error_at?new Date(row.last_error_at).toISOString():null,
-    healthDetails:row.health_details??{}
+    healthDetails:jsonObject(row.health_details)
   };
 }
 
