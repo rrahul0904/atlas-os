@@ -58,7 +58,7 @@ export interface WebhookTransport{
   send(request:WebhookTransportRequest):Promise<WebhookTransportResponse>;
 }
 
-async function readBounded(response:Response,maxBytes:number){
+export async function readBounded(response:Response,maxBytes:number){
   if(!response.body)return "";
   const reader=response.body.getReader();
   const chunks:Uint8Array[]=[];

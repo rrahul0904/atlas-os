@@ -34,7 +34,10 @@ export function sanitizeIntegrationData(value:unknown,depth=0):unknown{
 
 function safeErrorMessage(error:unknown){
   const message=error instanceof Error?error.message:"integration-execution-failed";
-  return message.replace(/Bearer\s+[^\s]+/gi,"Bearer [redacted]").slice(0,500);
+  return message
+    .replace(/Bearer\s+[^\s]+/gi,"Bearer [redacted]")
+    .replace(/(?:token|secret|password|api[-_]?key)=([^\s&]+)/gi,match=>match.split("=")[0]+"=[redacted]")
+    .slice(0,500);
 }
 
 function classifyFailure(message:string){
@@ -72,6 +75,7 @@ export class IntegrationToolExecutor implements ToolExecutor{
     if(!connection)throw new WorkflowRuntimeError("non_retryable","integration-not-configured");
     if(connection.status==="not_configured")throw new WorkflowRuntimeError("non_retryable","integration-not-configured");
     if(connection.status==="needs_reauthentication")throw new WorkflowRuntimeError("non_retryable","integration-needs-reauthentication");
+    if(connection.status==="error"&&connection.healthDetails.category!=="retryable")throw new WorkflowRuntimeError("non_retryable","integration-unhealthy");
 
     const adapter=this.adapters.get(this.connector);
     if(!adapter)throw new WorkflowRuntimeError("non_retryable","integration-adapter-not-registered");
