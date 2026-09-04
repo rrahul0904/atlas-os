@@ -29,7 +29,9 @@ test("webhook adapter enforces host path and method allowlists",async()=>{
   const result=await adapter.execute("webhook.post",{path:"/events",body:{ok:true}},{tenantId:"t",workspaceId:"w",connectionId:"c",actionId:"webhook.post",idempotencyKey:"key-1",initiatedBy:"u"},base);
   assert.equal(result.externalId,"external-1");
   assert.equal(transport.requests[0].headers["idempotency-key"],"key-1");
-  await assert.rejects?.(()=>adapter.execute("webhook.put",{path:"/events"},{tenantId:"t",workspaceId:"w",connectionId:"c",actionId:"webhook.put",idempotencyKey:"k",initiatedBy:"u"},base as any));
+  let failed=false;
+  try{await adapter.execute("webhook.put",{path:"/events"},{tenantId:"t",workspaceId:"w",connectionId:"c",actionId:"webhook.put",idempotencyKey:"k",initiatedBy:"u"},base as any)}catch{failed=true}
+  assert.equal(failed,true);
 });
 
 test("webhook adapter rejects paths outside configuration",async()=>{
