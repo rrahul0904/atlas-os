@@ -12,4 +12,21 @@ declare module "node:assert/strict" {
 }
 declare module "node:crypto" {
   export function randomUUID(): string;
+  export function createHmac(algorithm: string, key: string): { update(value: string): { digest(encoding: "base64url"): string } };
+  export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
 }
+declare module "node:http" {
+  export interface IncomingMessage { url?: string; }
+  export interface ServerResponse {
+    writeHead(statusCode: number, headers?: Record<string,string>): void;
+    end(data?: string): void;
+  }
+  export function createServer(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>): { listen(port: number, cb?: () => void): void };
+}
+declare module "node:fs/promises" { export function readFile(path: string, encoding: "utf8"): Promise<string>; }
+declare module "node:url" { export function fileURLToPath(url: string | URL): string; }
+declare module "node:path" { export function dirname(path: string): string; export function resolve(...paths: string[]): string; }
+declare const process: { env: Record<string,string|undefined> };
+declare const Buffer: {
+  from(value: string | Uint8Array, encoding?: string): Uint8Array & { toString(encoding?: string): string };
+};

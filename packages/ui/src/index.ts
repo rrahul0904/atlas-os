@@ -1,0 +1,16 @@
+import type { VerticalDescriptor } from "../../domain/src/index.js";
+export interface DemoMetric { label:string;value:string;helper:string;tone?:"good"|"warn"|"critical"; }
+export interface DemoAttention { severity:"critical"|"warning"|"info";title:string;detail:string;action:string; }
+export interface DemoWorkspace {
+  vertical:VerticalDescriptor;greeting:string;subtitle:string;metrics:DemoMetric[];
+  attention:DemoAttention[];handled:string[];upcoming:string[];navigation:string[];
+}
+const escapeHtml=(value:string)=>value.replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]??char));
+export function renderWorkspace(workspace:DemoWorkspace):string{
+ const nav=workspace.navigation.map((item,index)=>`<button class="nav-item${index===0?" active":""}">${escapeHtml(item)}</button>`).join("");
+ const metrics=workspace.metrics.map(metric=>`<article class="metric ${metric.tone??""}"><span>${escapeHtml(metric.label)}</span><strong>${escapeHtml(metric.value)}</strong><small>${escapeHtml(metric.helper)}</small></article>`).join("");
+ const attention=workspace.attention.map(item=>`<article class="attention ${item.severity}"><div><b>${escapeHtml(item.title)}</b><p>${escapeHtml(item.detail)}</p></div><button>${escapeHtml(item.action)}</button></article>`).join("");
+ const handled=workspace.handled.map(item=>`<li>✓ ${escapeHtml(item)}</li>`).join("");
+ const upcoming=workspace.upcoming.map(item=>`<li>${escapeHtml(item)}</li>`).join("");
+ return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AtlasOS · ${escapeHtml(workspace.vertical.name)}</title><link rel="stylesheet" href="/assets/atlas.css"></head><body><div class="shell"><aside><div class="brand"><span>A</span><div><b>AtlasOS</b><small>${escapeHtml(workspace.vertical.name)}</small></div></div><nav>${nav}</nav><div class="agent-status">● Agents governed<br><small>Approval policy active</small></div></aside><main><header><div><small class="eyebrow">TODAY / ${escapeHtml(workspace.vertical.id.toUpperCase())}</small><h1>${escapeHtml(workspace.greeting)}</h1><p>${escapeHtml(workspace.subtitle)}</p></div><div class="top-actions"><button>⌘ Ask Atlas</button><button>Demo workspace</button></div></header><section class="metrics">${metrics}</section><section class="grid"><div class="panel"><div class="panel-head"><h2>Needs your attention</h2><span>${workspace.attention.length} items</span></div>${attention}</div><div class="panel"><div class="panel-head"><h2>AI handled</h2><span>Today</span></div><ul class="handled">${handled}</ul></div></section><section class="grid lower"><div class="panel"><div class="panel-head"><h2>Upcoming</h2><span>Next 24h</span></div><ul>${upcoming}</ul></div><div class="panel command"><small class="eyebrow">ASK YOUR BUSINESS</small><h2>What should I work on next?</h2><div class="ask"><input aria-label="Ask Atlas" placeholder="Ask about customers, money, work, risks, growth…"><button>Ask Atlas</button></div><p>Answers must be grounded in workspace evidence and permissions.</p></div></section></main></div><script>document.querySelectorAll('.attention button').forEach(b=>b.addEventListener('click',()=>{b.textContent='Queued for review';b.disabled=true}));</script></body></html>`;
+}
