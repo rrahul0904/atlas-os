@@ -196,6 +196,129 @@ export class ActionItemRepository{
   }
 }
 
+export interface StoredBillingAccount{
+  tenantId:string;workspaceId:string;provider:string;customerRef:string|null;subscriptionRef:string|null;
+  status:string;planId:string;priceRef:string|null;currentPeriodEnd:string|null;cancelAtPeriodEnd:boolean;
+  trialEndsAt:string|null;lastInvoiceRef:string|null;lastPaymentAt:string|null;lastWebhookAt:string|null;updatedAt:string;
+}
+
+function mapBilling(row:any):StoredBillingAccount{
+  return{
+    tenantId:row.tenant_id,workspaceId:row.workspace_id,provider:row.provider,
+    customerRef:row.customer_ref??null,subscriptionRef:row.subscription_ref??null,status:row.status,planId:row.plan_id,
+    priceRef:row.price_ref??null,currentPeriodEnd:row.current_period_end?new Date(row.current_period_end).toISOString():null,
+    cancelAtPeriodEnd:Boolean(row.cancel_at_period_end),trialEndsAt:row.trial_ends_at?new Date(row.trial_ends_at).toISOString():null,
+    lastInvoiceRef:row.last_invoice_ref??null,lastPaymentAt:row.last_payment_at?new Date(row.last_payment_at).toISOString():null,
+    lastWebhookAt:row.last_webhook_at?new Date(row.last_webhook_at).toISOString():null,updatedAt:new Date(row.updated_at).toISOString()
+  };
+}
+
+export class BillingRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async findScoped(scope:{tenantId:string;workspaceId:string}):Promise<StoredBillingAccount|null>{
+    const rows=await this.sql`SELECT * FROM atlas_billing_accounts WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} LIMIT 1`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+  async ensure(scope:{tenantId:string;workspaceId:string},planId:string,status="trialing"){
+    const rows=await this.sql`INSERT INTO atlas_billing_accounts(workspace_id,tenant_id,status,plan_id)
+      VALUES(${scope.workspaceId},${scope.tenantId},${status},${planId})
+      ON CONFLICT(workspace_id) DO UPDATE SET updated_at=now()
+      WHERE atlas_billing_accounts.tenant_id=excluded.tenant_id RETURNING *`;
+    if(!rows[0])throw new Error("billing-scope-conflict");
+    return mapBilling(rows[0]);
+  }
+  async setCustomer(scope:{tenantId:string;workspaceId:string},customerRef:string){
+    const rows=await this.sql`UPDATE atlas_billing_accounts SET customer_ref=${customerRef},updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+  async applySubscription(scope:{tenantId:string;workspaceId:string},input:{
+    customerRef?:string|null;subscriptionRef:string;status:string;planId:string;priceRef:string;
+    currentPeriodEnd?:string|null;cancelAtPeriodEnd?:boolean;trialEndsAt?:string|null;
+  }){
+    const rows=await this.sql`UPDATE atlas_billing_accounts SET
+      customer_ref=COALESCE(${input.customerRef??null},customer_ref),subscription_ref=${input.subscriptionRef},
+      status=${input.status},plan_id=${input.planId},price_ref=${input.priceRef},
+      current_period_end=${input.currentPeriodEnd??null},cancel_at_period_end=${input.cancelAtPeriodEnd??false},
+      trial_ends_at=${input.trialEndsAt??null},last_webhook_at=now(),updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+  async markCanceled(scope:{tenantId:string;workspaceId:string},subscriptionRef:string){
+    const rows=await this.sql`UPDATE atlas_billing_accounts SET status='canceled',subscription_ref=${subscriptionRef},
+      cancel_at_period_end=false,last_webhook_at=now(),updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+  async markInvoice(scope:{tenantId:string;workspaceId:string},input:{invoiceRef:string;paid:boolean;status:string}){
+    const rows=await this.sql`UPDATE atlas_billing_accounts SET
+      last_invoice_ref=${input.invoiceRef},last_payment_at=CASE WHEN ${input.paid} THEN now() ELSE last_payment_at END,
+      status=CASE WHEN ${input.paid} AND status='past_due' THEN 'active' WHEN NOT ${input.paid} THEN ${input.status} ELSE status END,
+      last_webhook_at=now(),updated_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+  async findByCustomerRef(customerRef:string):Promise<StoredBillingAccount|null>{
+    const rows=await this.sql`SELECT * FROM atlas_billing_accounts WHERE provider='stripe' AND customer_ref=${customerRef} LIMIT 1`;
+    return rows[0]?mapBilling(rows[0]):null;
+  }
+}
+
+export class CheckoutSessionRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async create(scope:{tenantId:string;workspaceId:string},input:{planId:string;sessionRef:string;createdBy:string}){
+    const id=randomUUID();
+    await this.sql`INSERT INTO atlas_checkout_sessions(id,tenant_id,workspace_id,requested_plan_id,stripe_session_ref,created_by)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.planId},${input.sessionRef},${input.createdBy})`;
+    return id;
+  }
+  async complete(scope:{tenantId:string;workspaceId:string},sessionRef:string){
+    const rows=await this.sql`UPDATE atlas_checkout_sessions SET status='completed',completed_at=now()
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND stripe_session_ref=${sessionRef} RETURNING id`;
+    return Boolean(rows[0]);
+  }
+}
+
+export class BillingEventRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async receive(input:{stripeEventId:string;eventType:string;livemode:boolean}){
+    const id=randomUUID();
+    const rows=await this.sql`INSERT INTO atlas_billing_events(id,stripe_event_id,event_type,livemode,status)
+      VALUES(${id},${input.stripeEventId},${input.eventType},${input.livemode},'received')
+      ON CONFLICT(stripe_event_id) DO NOTHING RETURNING id`;
+    return rows[0]?.id as string|undefined;
+  }
+  async processed(id:string,scope:{tenantId:string;workspaceId:string}|null,input:{objectRef?:string|null;metadata?:Record<string,unknown>;ignored?:boolean}={}){
+    await this.sql`UPDATE atlas_billing_events SET
+      tenant_id=${scope?.tenantId??null},workspace_id=${scope?.workspaceId??null},
+      status=${input.ignored?"ignored":"processed"},object_ref=${input.objectRef??null},
+      safe_metadata=${JSON.stringify(input.metadata??{})}::jsonb,processed_at=now(),error=NULL
+      WHERE id=${id}`;
+  }
+  async failed(id:string,message:string){await this.sql`UPDATE atlas_billing_events SET status='failed',error=${message.slice(0,500)},processed_at=now() WHERE id=${id}`;}
+}
+
+export class UsageRepository{
+  constructor(private readonly sql:AtlasSql){}
+  async record(scope:{tenantId:string;workspaceId:string},input:{
+    metric:string;quantity:number;moduleId?:string|null;agentId?:string|null;workflowId?:string|null;provider?:string|null;
+    idempotencyKey?:string|null;occurredAt?:string;
+  }){
+    if(!Number.isFinite(input.quantity)||input.quantity<0)throw new Error("usage-quantity-invalid");
+    const id=randomUUID();
+    const rows=await this.sql`INSERT INTO atlas_usage_events(id,tenant_id,workspace_id,metric,quantity,module_id,agent_id,workflow_id,provider,idempotency_key,occurred_at)
+      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.metric},${input.quantity},${input.moduleId??null},${input.agentId??null},${input.workflowId??null},${input.provider??null},${input.idempotencyKey??null},${input.occurredAt??new Date().toISOString()})
+      ON CONFLICT(workspace_id,metric,idempotency_key) DO NOTHING RETURNING id`;
+    return rows[0]?.id as string|undefined;
+  }
+  async summary(scope:{tenantId:string;workspaceId:string},days=30){
+    const safeDays=Math.max(1,Math.min(365,Math.floor(days)));
+    return this.sql`SELECT metric,SUM(quantity)::float8 AS quantity FROM atlas_usage_events
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND occurred_at>=now()-${safeDays}*interval '1 day'
+      GROUP BY metric ORDER BY metric`;
+  }
+}
+
 export interface StoredIntegrationConnection{
   id:string;
   tenantId:string;
