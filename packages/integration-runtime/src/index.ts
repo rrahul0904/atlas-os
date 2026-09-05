@@ -41,13 +41,14 @@ function safeErrorMessage(error:unknown){
 }
 
 function classifyFailure(message:string){
-  if(/timeout|aborted|econnreset|eai_again|enotfound|webhook-http-(429|502|503|504)/i.test(message))return "retryable" as const;
+  if(/timeout|aborted|econnreset|eai_again|enotfound|webhook-http-(429|502|503|504)|google-network|google-ambiguous|google-http-(429|500|502|503|504)/i.test(message))return "retryable" as const;
   return "non_retryable" as const;
 }
 
 function healthForFailure(message:string):IntegrationHealth{
+  const reauthentication=/google-needs-reauthentication|google-http-401|invalid_grant/i.test(message);
   return{
-    state:"error",
+    state:reauthentication?"needs_reauthentication":"error",
     message:message.slice(0,500),
     checkedAt:new Date().toISOString(),
     details:{category:classifyFailure(message)}
@@ -88,6 +89,14 @@ export class IntegrationToolExecutor implements ToolExecutor{
     const missingCapabilityScopes=capability.requiredScopes.filter(scopeName=>!tool.scopes.includes(scopeName));
     if(missingCapabilityScopes.length){
       throw new WorkflowRuntimeError("non_retryable",`integration-capability-scopes-missing:${missingCapabilityScopes.join(",")}`);
+    }
+    if(capability.write&&!tool.isWrite){
+      throw new WorkflowRuntimeError("non_retryable","integration-capability-write-mismatch");
+    }
+    const providerHighRisk=capability.risk==="high"||capability.risk==="critical";
+    const declaredHighRisk=tool.risk==="high"||tool.risk==="critical";
+    if(providerHighRisk&&!declaredHighRisk){
+      throw new WorkflowRuntimeError("non_retryable","integration-capability-risk-mismatch");
     }
 
     const startedAt=Date.now();
