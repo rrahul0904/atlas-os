@@ -146,13 +146,28 @@ export class GoogleTokenManager{
 
   async disconnect(scope:SecretScope){
     const current=await this.connections.findByIntegration(scope,GOOGLE_INTEGRATION_ID);
-    if(current?.secretReference)await this.secrets.delete(scope,current.secretReference);
-    return this.connections.upsert(scope,{
+    let revoked=false;
+    if(current?.secretReference){
+      try{
+        const token=await this.load(scope,current);
+        const value=token.refreshToken??token.accessToken;
+        const response=await this.transport.request({
+          url:"https://oauth2.googleapis.com/revoke",
+          method:"POST",
+          headers:{"content-type":"application/x-www-form-urlencoded","accept":"application/json"},
+          body:formBody({token:value})
+        });
+        revoked=response.status>=200&&response.status<300;
+      }catch{}
+      await this.secrets.delete(scope,current.secretReference);
+    }
+    const connection=await this.connections.upsert(scope,{
       integrationId:GOOGLE_INTEGRATION_ID,
       status:"not_configured",
       externalAccountRef:null,
       secretReference:null,
       config:{}
     });
+    return{connection,revoked};
   }
 }
