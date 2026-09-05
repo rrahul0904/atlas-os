@@ -16,6 +16,19 @@ declare module "node:crypto" {
   export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   export function randomBytes(size: number): Uint8Array & { toString(encoding?: string): string };
   export function scryptSync(password: string, salt: string, keylen: number): Uint8Array & { toString(encoding?: string): string };
+  export function createHash(algorithm: string): { update(value: string | Uint8Array): any; digest(): Uint8Array & { toString(encoding?: string): string } };
+  export function createCipheriv(algorithm: string, key: Uint8Array, iv: Uint8Array): {
+    setAAD(value: Uint8Array): void;
+    update(value: string | Uint8Array, inputEncoding?: string): Uint8Array;
+    final(): Uint8Array;
+    getAuthTag(): Uint8Array;
+  };
+  export function createDecipheriv(algorithm: string, key: Uint8Array, iv: Uint8Array): {
+    setAAD(value: Uint8Array): void;
+    setAuthTag(value: Uint8Array): void;
+    update(value: Uint8Array): Uint8Array;
+    final(): Uint8Array;
+  };
 }
 declare module "node:http" {
   export interface IncomingMessage {
