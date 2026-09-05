@@ -3,10 +3,25 @@ import assert from "node:assert/strict";
 import {renderIntegrationsPage} from "./integrations-page.js";
 
 test("integrations page renders truthful not-configured Google state",()=>{
-  const html=renderIntegrationsPage({workspaceName:"Acme",connections:[],canManage:true});
-  assert.ok(html.includes("Google Workspace"));
+  const html=renderIntegrationsPage({workspaceName:"Acme",connections:[],canManage:true,googleConnectAvailable:false});
+  assert.ok(html.includes("Gmail + Calendar"));
   assert.ok(html.includes("Not connected"));
-  assert.ok(html.includes("OAuth is intentionally not activated"));
+  assert.ok(html.includes("Google OAuth server configuration is not available"));
+  assert.equal(html.includes("Connect Google"),false);
+});
+
+test("connected Google state exposes account and controls but never secret reference",()=>{
+  const html=renderIntegrationsPage({workspaceName:"Acme",canManage:true,googleConnectAvailable:true,connections:[{
+    id:"g",tenantId:"t",workspaceId:"w",integrationId:"google-workspace",status:"connected",
+    externalAccountRef:"owner@example.test",secretReference:"pgsecret:super-private-reference",
+    config:{scopes:["https://www.googleapis.com/auth/gmail.send","https://www.googleapis.com/auth/calendar.events"]},
+    lastHealthAt:"2026-09-05T00:00:00Z",lastSuccessAt:"2026-09-05T00:00:00Z",lastError:null,lastErrorAt:null,healthDetails:{}
+  }]});
+  assert.ok(html.includes("owner@example.test"));
+  assert.ok(html.includes("Reconnect Google"));
+  assert.ok(html.includes("/app/integrations/google/check"));
+  assert.ok(html.includes("/app/integrations/google/disconnect"));
+  assert.equal(html.includes("super-private-reference"),false);
 });
 
 test("webhook integration renders persisted health without secret values",()=>{
