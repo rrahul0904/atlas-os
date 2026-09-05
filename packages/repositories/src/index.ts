@@ -414,7 +414,7 @@ export class WorkflowRepository{
   }
   async getStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string){
     const rows=await this.sql`SELECT * FROM atlas_workflow_step_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} AND step_id=${stepId} LIMIT 1`;
-    return rows[0]??null;
+    return rows[0]?mapWorkflowStepRun(rows[0]):null;
   }
   async beginStep(scope:{tenantId:string;workspaceId:string},runId:string,step:{id:string;kind:WorkflowStepKind},idempotencyKey:string){
     const id=randomUUID();
@@ -430,13 +430,18 @@ export class WorkflowRepository{
     return rows[0];
   }
   async listSteps(scope:{tenantId:string;workspaceId:string},runId:string){
-    return this.sql`SELECT * FROM atlas_workflow_step_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} ORDER BY started_at,step_id`;
+    const rows=await this.sql`SELECT * FROM atlas_workflow_step_runs WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} ORDER BY started_at,step_id`;
+    return rows.map(mapWorkflowStepRun);
   }
   async finishStep(scope:{tenantId:string;workspaceId:string},runId:string,stepId:string,input:{status:"waiting"|"completed"|"failed";output?:Record<string,unknown>;error?:string|null}){
     const rows=await this.sql`UPDATE atlas_workflow_step_runs SET status=${input.status},output=${JSON.stringify(input.output??{})}::jsonb,error=${input.error??null},finished_at=CASE WHEN ${input.status==="waiting"} THEN NULL ELSE now() END
       WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND run_id=${runId} AND step_id=${stepId} RETURNING *`;
     return rows[0]??null;
   }
+}
+
+function mapWorkflowStepRun(row:any){
+  return{...row,output:jsonObject(row.output)};
 }
 
 function mapRun(row:any):StoredWorkflowRun{
