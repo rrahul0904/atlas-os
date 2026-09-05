@@ -12,7 +12,7 @@ declare module "node:assert/strict" {
 }
 declare module "node:crypto" {
   export function randomUUID(): string;
-  export function createHmac(algorithm: string, key: string): { update(value: string): { digest(encoding: "base64url"): string } };
+  export function createHmac(algorithm: string, key: string): { update(value: string): { digest(encoding: "base64url"|"hex"): string } };
   export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   export function randomBytes(size: number): Uint8Array & { toString(encoding?: string): string };
   export function scryptSync(password: string, salt: string, keylen: number): Uint8Array & { toString(encoding?: string): string };
