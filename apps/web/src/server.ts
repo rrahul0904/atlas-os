@@ -280,7 +280,7 @@ createServer(async(req,res)=>{
       if(!connection){json(res,{status:"not_found",message:"Google Workspace is not connected."},404);return;}
       try{
         const google=createGoogleRuntime(db());
-        const health=await google.adapter.health({...scope,connectionId:connection.id},connection.config);
+        const health=await google.adapter.health({...scope,connectionId:connection.id});
         await repository.updateHealth(scope,connection.id,health);
         await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"integration.health_checked",targetType:"integration_connection",targetId:connection.id,metadata:{integrationId:"google-workspace",state:health.state}});
         redirect(res,"/app/integrations");return;
