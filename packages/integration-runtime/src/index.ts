@@ -90,6 +90,14 @@ export class IntegrationToolExecutor implements ToolExecutor{
     if(missingCapabilityScopes.length){
       throw new WorkflowRuntimeError("non_retryable",`integration-capability-scopes-missing:${missingCapabilityScopes.join(",")}`);
     }
+    if(capability.write&&!tool.isWrite){
+      throw new WorkflowRuntimeError("non_retryable","integration-capability-write-mismatch");
+    }
+    const providerHighRisk=capability.risk==="high"||capability.risk==="critical";
+    const declaredHighRisk=tool.risk==="high"||tool.risk==="critical";
+    if(providerHighRisk&&!declaredHighRisk){
+      throw new WorkflowRuntimeError("non_retryable","integration-capability-risk-mismatch");
+    }
 
     const startedAt=Date.now();
     await this.audit.record(scope,{
