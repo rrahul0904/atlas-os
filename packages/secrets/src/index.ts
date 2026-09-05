@@ -46,16 +46,25 @@ function aad(scope:SecretScope,id:string){
   return Buffer.from(`${scope.tenantId}|${scope.workspaceId}|${id}`,"utf8");
 }
 
+function concatBytes(parts:Uint8Array[]){
+  const total=parts.reduce((sum,part)=>sum+part.byteLength,0);
+  const merged=new Uint8Array(total);let offset=0;
+  for(const part of parts){merged.set(part,offset);offset+=part.byteLength}
+  return merged;
+}
+
+function encoded(bytes:Uint8Array){return Buffer.from(bytes).toString("base64url")}
+
 function encrypt(scope:SecretScope,id:string,value:string,key:Uint8Array){
   const iv=randomBytes(12);
   const cipher=createCipheriv("aes-256-gcm",key,iv);
   cipher.setAAD(aad(scope,id));
-  const ciphertext=Buffer.concat([cipher.update(value,"utf8"),cipher.final()]);
+  const ciphertext=concatBytes([cipher.update(Buffer.from(value,"utf8")),cipher.final()]);
   const authTag=cipher.getAuthTag();
   return{
-    ciphertext:ciphertext.toString("base64url"),
-    iv:iv.toString("base64url"),
-    authTag:authTag.toString("base64url")
+    ciphertext:encoded(ciphertext),
+    iv:encoded(iv),
+    authTag:encoded(authTag)
   };
 }
 
@@ -63,10 +72,10 @@ function decrypt(scope:SecretScope,id:string,row:{ciphertext:string;iv:string;au
   const decipher=createDecipheriv("aes-256-gcm",key,Buffer.from(row.iv,"base64url"));
   decipher.setAAD(aad(scope,id));
   decipher.setAuthTag(Buffer.from(row.auth_tag,"base64url"));
-  return Buffer.concat([
+  return Buffer.from(concatBytes([
     decipher.update(Buffer.from(row.ciphertext,"base64url")),
     decipher.final()
-  ]).toString("utf8");
+  ])).toString("utf8");
 }
 
 export class EncryptedPostgresSecretStore implements SecretStore{
