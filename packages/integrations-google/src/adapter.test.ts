@@ -21,8 +21,11 @@ class DynamicTransport implements GoogleHttpTransport{
 
     if(url.hostname==="gmail.googleapis.com"&&url.pathname.endsWith("/messages")&&input.method!=="POST"){
       const q=url.searchParams.get("q")??"";
-      if(q.startsWith("rfc822msgid:")&&this.gmailMessageId&&q.includes(this.gmailMessageId)){
-        return{status:200,body:JSON.stringify({messages:[{id:"gmail-1",threadId:"thread-1"}],resultSizeEstimate:1}),headers:{}};
+      if(q.startsWith("rfc822msgid:")){
+        if(this.gmailMessageId&&q.includes(this.gmailMessageId)){
+          return{status:200,body:JSON.stringify({messages:[{id:"gmail-1",threadId:"thread-1"}],resultSizeEstimate:1}),headers:{}};
+        }
+        return{status:200,body:JSON.stringify({messages:[],resultSizeEstimate:0}),headers:{}};
       }
       if(q)return{status:200,body:JSON.stringify({messages:[{id:"search-1",threadId:"thread-1"}],resultSizeEstimate:1}),headers:{}};
       return{status:200,body:JSON.stringify({messages:[],resultSizeEstimate:0}),headers:{}};
