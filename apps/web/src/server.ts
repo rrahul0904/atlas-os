@@ -22,6 +22,7 @@ import {seedDefaultAgents} from "../../../packages/agents/src/index.js";
 import {resolveWorkflowApproval} from "../../../packages/approvals/src/index.js";
 import {WebhookIntegrationAdapter,validateWebhookConfiguration,type WebhookConfig} from "../../../packages/integrations-webhook/src/index.js";
 import {canViewIntegrations,canManageIntegrations} from "./integration-permissions.js";
+import {createGoogleRuntime,googleRuntimeConfigured} from "../../../packages/integrations-google/src/index.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -69,7 +70,7 @@ function setupFrom(req:IncomingMessage){const secret=authSecret();const token=co
 function runtimeReady(){return Boolean(authSecret()&&databaseConfigured());}
 
 createServer(async(req,res)=>{
-  const path=(req.url||"/").split("?")[0];const method=(req.method||"GET").toUpperCase();
+  const requestUrl=new URL(req.url||"/","http://atlas.local");const path=requestUrl.pathname;const method=(req.method||"GET").toUpperCase();
   try{
     if(path==="/health"){const health=databaseConfigured()?await dbHealth():{status:"not_configured" as const};json(res,{status:"ok",product:"AtlasOS",database:health.status});return;}
     if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured()},503);return;}const health=await dbHealth();json(res,{status:health.status},health.status==="ok"?200:503);return;}
@@ -177,7 +178,7 @@ createServer(async(req,res)=>{
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);
       if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
       const connections=await new IntegrationConnectionRepository(db()).list({tenantId:principal.tenantId,workspaceId:principal.workspaceId});
-      html(res,renderIntegrationsPage({workspaceName:workspace.name,connections,canManage:roleAtLeast(principal.role,"admin")}));return;
+      html(res,renderIntegrationsPage({workspaceName:workspace.name,connections,canManage:roleAtLeast(principal.role,"admin"),googleConnectAvailable:googleRuntimeConfigured()}));return;
     }
 
     if(path==="/app/integrations/webhook/save"&&method==="POST"){
@@ -238,6 +239,67 @@ createServer(async(req,res)=>{
         metadata:{integrationId:"webhook",state:health.state}
       });
       redirect(res,"/app/integrations");return;
+    }
+
+    if(path==="/app/integrations/google/connect"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to connect Google."},403);return;}
+      try{
+        const google=createGoogleRuntime(db());
+        const started=await google.oauth.begin(principal);
+        redirect(res,started.authorizationUrl);return;
+      }catch(error){
+        const message=error instanceof Error?error.message:"google-oauth-start-failed";
+        json(res,{status:"not_configured",message},503);return;
+      }
+    }
+
+    if(path==="/app/integrations/google/callback"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to complete Google connection."},403);return;}
+      const providerError=requestUrl.searchParams.get("error");
+      if(providerError){json(res,{status:"google_oauth_error",message:providerError.slice(0,200)},400);return;}
+      const state=requestUrl.searchParams.get("state")??"";const code=requestUrl.searchParams.get("code")??"";
+      try{
+        const google=createGoogleRuntime(db());
+        await google.oauth.complete(principal,state,code);
+        redirect(res,"/app/integrations");return;
+      }catch(error){
+        const message=error instanceof Error?error.message:"google-oauth-callback-failed";
+        json(res,{status:"google_oauth_error",message},400);return;
+      }
+    }
+
+    if(path==="/app/integrations/google/check"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to check Google health."},403);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const repository=new IntegrationConnectionRepository(db());
+      const connection=await repository.findByIntegration(scope,"google-workspace");
+      if(!connection){json(res,{status:"not_found",message:"Google Workspace is not connected."},404);return;}
+      try{
+        const google=createGoogleRuntime(db());
+        const health=await google.adapter.health({...scope,connectionId:connection.id},connection.config);
+        await repository.updateHealth(scope,connection.id,health);
+        await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"integration.health_checked",targetType:"integration_connection",targetId:connection.id,metadata:{integrationId:"google-workspace",state:health.state}});
+        redirect(res,"/app/integrations");return;
+      }catch(error){
+        json(res,{status:"error",message:error instanceof Error?error.message:"google-health-check-failed"},503);return;
+      }
+    }
+
+    if(path==="/app/integrations/google/disconnect"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to disconnect Google."},403);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      try{
+        const google=createGoogleRuntime(db());
+        const result=await google.tokens.disconnect(scope);
+        await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"integration.disconnected",targetType:"integration_connection",targetId:result.connection.id,metadata:{integrationId:"google-workspace",providerRevoked:result.revoked}});
+        redirect(res,"/app/integrations");return;
+      }catch(error){
+        json(res,{status:"error",message:error instanceof Error?error.message:"google-disconnect-failed"},503);return;
+      }
     }
 
     if(path==="/api/atlas/ask"&&method==="POST"){
