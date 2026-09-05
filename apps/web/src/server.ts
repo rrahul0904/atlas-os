@@ -67,13 +67,14 @@ function scopesForRole(role:AtlasRole):string[]{
 function register(){resetRegistry();registerAtlasModules();registerAtlasVerticals();}
 function sessionFrom(req:IncomingMessage):TenantPrincipal|null{const secret=authSecret();const token=cookies(req).atlas_session;if(!secret||!token)return null;const session=verifySession(token,secret);if(!session)return null;return{userId:session.userId,tenantId:session.tenantId,workspaceId:session.workspaceId,role:session.role,scopes:session.scopes};}
 function setupFrom(req:IncomingMessage){const secret=authSecret();const token=cookies(req).atlas_setup;return secret&&token?verifySetupToken(token,secret):null;}
-function runtimeReady(){return Boolean(authSecret()&&databaseConfigured());}
+function googleDeclared(){return Boolean(process.env.GOOGLE_CLIENT_ID||process.env.GOOGLE_CLIENT_SECRET||process.env.GOOGLE_OAUTH_REDIRECT_URI)}
+function runtimeReady(){return Boolean(authSecret()&&databaseConfigured()&&(!googleDeclared()||googleRuntimeConfigured()));}
 
 createServer(async(req,res)=>{
   const requestUrl=new URL(req.url||"/","http://atlas.local");const path=requestUrl.pathname;const method=(req.method||"GET").toUpperCase();
   try{
     if(path==="/health"){const health=databaseConfigured()?await dbHealth():{status:"not_configured" as const};json(res,{status:"ok",product:"AtlasOS",database:health.status});return;}
-    if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured()},503);return;}const health=await dbHealth();json(res,{status:health.status},health.status==="ok"?200:503);return;}
+    if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured(),google:googleDeclared()?googleRuntimeConfigured():"not_configured"},503);return;}const health=await dbHealth();json(res,{status:health.status,google:googleDeclared()?"configured":"not_configured"},health.status==="ok"?200:503);return;}
     if(path==="/assets/atlas.css"){const css=await readFile(resolve(root,"apps/web/static/atlas.css"),"utf8");res.writeHead(200,{"content-type":"text/css; charset=utf-8"});res.end(css);return;}
     if(path==="/"&&method==="GET"){html(res,renderIndex());return;}
     const demoMatch=path.match(/^\/demo\/(founder|ceo|dental|contractor|agency)$/);
