@@ -87,7 +87,7 @@ test("expired and tampered Google OAuth state are rejected before provider excha
 
     await sql`UPDATE atlas_oauth_transactions SET expires_at=now()-interval '1 minute' WHERE tenant_id=${principal.tenantId} AND workspace_id=${principal.workspaceId}`;
     let expired=false;
-    try{await service.complete(principal,state,"code")}catch(error){expired=error instanceof Error&&error.message==="google-oauth-state-invalid-or-expired"}
+    try{await service.complete(principal,state,"valid-code")}catch(error){expired=error instanceof Error&&error.message==="google-oauth-state-invalid-or-expired"}
     assert.equal(expired,true);
     assert.equal(transport.requests.length,0);
   }finally{await closeDb()}
