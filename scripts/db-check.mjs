@@ -15,6 +15,10 @@ try{
   if(missing.length) throw new Error(`Missing AtlasOS tables: ${missing.join(", ")}`);
   const integrationColumns=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_integration_connections' AND column_name IN ('last_success_at','last_error','last_error_at','health_details')`;
   if(integrationColumns.length!==4) throw new Error("Missing integration health columns");
+  const billingColumns=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_billing_accounts' AND column_name IN ('price_ref','cancel_at_period_end','trial_ends_at','subscription_event_created_at','created_at')`;
+  if(billingColumns.length!==5) throw new Error("Missing Stripe billing columns");
+  const eventColumns=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_billing_events' AND column_name IN ('provider_created_at','verified_at','processed_at')`;
+  if(eventColumns.length!==3) throw new Error("Missing Stripe billing event columns");
   const approvalMode=await sql`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='atlas_workspaces' AND column_name='approval_mode'`;
   if(!approvalMode.length) throw new Error("Missing atlas_workspaces.approval_mode");
   const migrations=await sql`SELECT count(*)::int AS count FROM atlas_schema_migrations`;
