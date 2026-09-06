@@ -7,12 +7,14 @@ import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
 import {renderConnectedTodayView} from "./connected-today.js";
 import {renderAgentsPage,renderApprovalsPage,renderWorkflowsPage} from "./operations-pages.js";
 import {renderIntegrationsPage} from "./integrations-page.js";
+import {renderBillingPage} from "./billing-page.js";
+import {canViewBilling,canManageBilling} from "./billing-permissions.js";
 import {db,databaseConfigured,dbHealth} from "../../../packages/db/src/index.js";
-import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,AgentRepository,ApprovalRepository,WorkflowRepository,IntegrationConnectionRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
+import {UserRepository,MembershipRepository,WorkspaceRepository,ModuleConfigurationRepository,AuditRepository,AgentRepository,ApprovalRepository,WorkflowRepository,IntegrationConnectionRepository,BillingRepository,UsageRepository,provisionWorkspace} from "../../../packages/repositories/src/index.js";
 import {hashPassword,verifyPassword,createSetupToken,verifySetupToken,createSession,verifySession} from "../../../packages/auth/src/index.js";
 import {resetRegistry,getVertical} from "../../../packages/module-registry/src/index.js";
 import {registerAtlasModules,registerAtlasVerticals} from "../../../packages/module-registry/src/catalog.js";
-import {intersectEnabledModules} from "../../../packages/entitlements/src/index.js";
+import {intersectEnabledModules,intersectBillingEnabledModules,isAtlasPlan,moduleEntitledForBilling} from "../../../packages/entitlements/src/index.js";
 import type {AtlasRole,TenantPrincipal} from "../../../packages/tenancy/src/index.js";
 import {roleAtLeast} from "../../../packages/tenancy/src/index.js";
 import {buildToday,createPersistenceTodayProvider} from "../../../packages/today/src/index.js";
@@ -23,6 +25,7 @@ import {resolveWorkflowApproval} from "../../../packages/approvals/src/index.js"
 import {WebhookIntegrationAdapter,validateWebhookConfiguration,type WebhookConfig} from "../../../packages/integrations-webhook/src/index.js";
 import {canViewIntegrations,canManageIntegrations} from "./integration-permissions.js";
 import {createGoogleRuntime,googleRuntimeConfigured} from "../../../packages/integrations-google/src/index.js";
+import {createStripeBillingRuntime,stripeBillingConfigured} from "../../../packages/billing-stripe/src/index.js";
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
 const port=Number(process.env.PORT||3000);
@@ -43,15 +46,20 @@ function html(res:ServerResponse,body:string,status=200){res.writeHead(status,{"
 function json(res:ServerResponse,payload:unknown,status=200){res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(payload));}
 function readBody(req:IncomingMessage,maxBytes=64*1024):Promise<string>{
   return new Promise((resolveBody,reject)=>{
-    const chunks:string[]=[];let size=0;let failed=false;
+    const chunks:Uint8Array[]=[];let size=0;let failed=false;
     req.on("data",chunk=>{
       if(failed)return;
-      const text=typeof chunk==="string"?chunk:Buffer.from(chunk).toString("utf8");
-      size+=text.length;
+      const bytes=typeof chunk==="string"?Buffer.from(chunk,"utf8"):Buffer.from(chunk);
+      size+=bytes.byteLength;
       if(size>maxBytes){failed=true;reject(new Error("request-body-too-large"));return;}
-      chunks.push(text);
+      chunks.push(bytes);
     });
-    req.on("end",()=>{if(!failed)resolveBody(chunks.join(""))});
+    req.on("end",()=>{
+      if(failed)return;
+      const merged=new Uint8Array(size);let offset=0;
+      for(const chunk of chunks){merged.set(chunk,offset);offset+=chunk.byteLength}
+      resolveBody(new TextDecoder().decode(merged));
+    });
     req.on("error",reject);
   });
 }
@@ -68,17 +76,38 @@ function register(){resetRegistry();registerAtlasModules();registerAtlasVertical
 function sessionFrom(req:IncomingMessage):TenantPrincipal|null{const secret=authSecret();const token=cookies(req).atlas_session;if(!secret||!token)return null;const session=verifySession(token,secret);if(!session)return null;return{userId:session.userId,tenantId:session.tenantId,workspaceId:session.workspaceId,role:session.role,scopes:session.scopes};}
 function setupFrom(req:IncomingMessage){const secret=authSecret();const token=cookies(req).atlas_setup;return secret&&token?verifySetupToken(token,secret):null;}
 function googleDeclared(){return Boolean(process.env.GOOGLE_CLIENT_ID||process.env.GOOGLE_CLIENT_SECRET||process.env.GOOGLE_OAUTH_REDIRECT_URI)}
-function runtimeReady(){return Boolean(authSecret()&&databaseConfigured()&&(!googleDeclared()||googleRuntimeConfigured()));}
+function stripeDeclared(){return Boolean(process.env.STRIPE_SECRET_KEY||process.env.STRIPE_WEBHOOK_SECRET||process.env.STRIPE_PRICE_SOLO||process.env.STRIPE_PRICE_PROFESSIONAL||process.env.STRIPE_PRICE_BUSINESS||process.env.STRIPE_PRICE_PLATFORM)}
+function runtimeReady(){return Boolean(authSecret()&&databaseConfigured()&&(!googleDeclared()||googleRuntimeConfigured())&&(!stripeDeclared()||stripeBillingConfigured()));}
+async function billedModuleAllowed(principal:TenantPrincipal,moduleId:string){
+  const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);
+  return Boolean(workspace&&isAtlasPlan(workspace.planId)&&moduleEntitledForBilling(workspace.planId,workspace.billingStatus,moduleId));
+}
 
 createServer(async(req,res)=>{
   const requestUrl=new URL(req.url||"/","http://atlas.local");const path=requestUrl.pathname;const method=(req.method||"GET").toUpperCase();
   try{
     if(path==="/health"){const health=databaseConfigured()?await dbHealth():{status:"not_configured" as const};json(res,{status:"ok",product:"AtlasOS",database:health.status});return;}
-    if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured(),google:googleDeclared()?googleRuntimeConfigured():"not_configured"},503);return;}const health=await dbHealth();json(res,{status:health.status,google:googleDeclared()?"configured":"not_configured"},health.status==="ok"?200:503);return;}
+    if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured(),google:googleDeclared()?googleRuntimeConfigured():"not_configured",stripe:stripeDeclared()?stripeBillingConfigured():"not_configured"},503);return;}const health=await dbHealth();json(res,{status:health.status,google:googleDeclared()?"configured":"not_configured",stripe:stripeDeclared()?"configured":"not_configured"},health.status==="ok"?200:503);return;}
     if(path==="/assets/atlas.css"){const css=await readFile(resolve(root,"apps/web/static/atlas.css"),"utf8");res.writeHead(200,{"content-type":"text/css; charset=utf-8"});res.end(css);return;}
     if(path==="/"&&method==="GET"){html(res,renderIndex());return;}
     const demoMatch=path.match(/^\/demo\/(founder|ceo|dental|contractor|agency)$/);
     if(demoMatch&&method==="GET"&&validDemo.has(demoMatch[1] as DemoId)){html(res,renderDemo(demoMatch[1] as DemoId));return;}
+
+    if(path==="/webhooks/stripe"&&method==="POST"){
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured"},503);return;}
+      const signatureValue=req.headers["stripe-signature"];const stripeSignature=Array.isArray(signatureValue)?signatureValue[0]:signatureValue;
+      if(!stripeSignature){json(res,{status:"invalid_request",message:"Invalid Stripe webhook."},400);return;}
+      const raw=await readBody(req,512*1024);
+      try{
+        const result=await createStripeBillingRuntime(db()).handleWebhook(raw,stripeSignature);
+        json(res,{received:true,duplicate:result.duplicate});
+      }catch(error){
+        const message=error instanceof Error?error.message:"stripe-webhook-failed";
+        const invalid=message.startsWith("stripe-signature")||message==="stripe-event-json-invalid"||message==="stripe-event-invalid"||message==="stripe-event-object-invalid";
+        json(res,{status:"error",message:invalid?"Invalid Stripe webhook.":"Stripe webhook could not be processed."},invalid?400:500);
+      }
+      return;
+    }
 
     if(path==="/signup"&&method==="GET"){html(res,renderSignup());return;}
     if(path==="/signup"&&method==="POST"){
@@ -116,10 +145,77 @@ createServer(async(req,res)=>{
 
     if(path==="/logout"&&method==="POST"){redirect(res,"/login",[clearCookie("atlas_session"),clearCookie("atlas_setup")]);return;}
     if(path==="/app"&&method==="GET"){redirect(res,"/app/today");return;}
+
+    if(path==="/app/settings/billing"&&method==="GET"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canViewBilling(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to view billing."},403);return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const billing=await new BillingRepository(db()).ensure(scope,workspace.planId,workspace.billingStatus,workspace.trialEndsAt);
+      const rows=await new UsageRepository(db()).summary(scope);
+      const checkoutState=requestUrl.searchParams.get("checkout");
+      const message=checkoutState==="success"?"Checkout returned successfully. Access updates only after AtlasOS verifies the signed Stripe webhook.":checkoutState==="cancel"?"Checkout was canceled. No billing entitlement was changed.":null;
+      html(res,renderBillingPage({workspaceName:workspace.name,billing,usage:rows.map(row=>({metric:String(row.metric),quantity:Number(row.quantity)})),canManage:canManageBilling(principal.role),stripeConfigured:stripeBillingConfigured(),message}));return;
+    }
+
+    if(path==="/app/settings/billing/checkout"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageBilling(principal.role)){json(res,{status:"forbidden"},403);return;}
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured",message:"Stripe billing is not configured."},503);return;}
+      const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){json(res,{status:"not_found"},404);return;}
+      const data=await form(req);const requested=(data.get("plan")||"").trim();if(!isAtlasPlan(requested)){json(res,{status:"invalid_request",message:"Unknown AtlasOS plan."},400);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};await new BillingRepository(db()).ensure(scope,workspace.planId,workspace.billingStatus,workspace.trialEndsAt);
+      const user=await new UserRepository(db()).findById(principal.userId);if(!user){json(res,{status:"not_found"},404);return;}
+      const checkout=await createStripeBillingRuntime(db()).createCheckout(scope,{plan:requested,createdBy:principal.userId,email:user.email});
+      await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"billing.checkout_started",targetType:"workspace",targetId:scope.workspaceId,metadata:{requestedPlan:requested}});
+      redirect(res,checkout.url);return;
+    }
+
+    if(path==="/app/settings/billing/portal"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageBilling(principal.role)){json(res,{status:"forbidden"},403);return;}
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured"},503);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const portal=await createStripeBillingRuntime(db()).createPortal(scope);
+      await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"billing.portal_opened",targetType:"workspace",targetId:scope.workspaceId,metadata:{}});
+      redirect(res,portal.url);return;
+    }
+
+    if(path==="/app/settings/billing/plan"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageBilling(principal.role)){json(res,{status:"forbidden"},403);return;}
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured"},503);return;}
+      const data=await form(req);const requested=(data.get("plan")||"").trim();if(!isAtlasPlan(requested)){json(res,{status:"invalid_request"},400);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      const result=await createStripeBillingRuntime(db()).changePlan(scope,requested);
+      await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"billing.plan_change_requested",targetType:"workspace",targetId:scope.workspaceId,metadata:{requestedPlan:requested,effectivePolicy:result.effectivePolicy}});
+      redirect(res,"/app/settings/billing");return;
+    }
+
+    if(path==="/app/settings/billing/cancel"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageBilling(principal.role)){json(res,{status:"forbidden"},403);return;}
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured"},503);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      await createStripeBillingRuntime(db()).cancelAtPeriodEnd(scope);
+      await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"billing.cancel_requested",targetType:"workspace",targetId:scope.workspaceId,metadata:{effective:"period_end"}});
+      redirect(res,"/app/settings/billing");return;
+    }
+
+    if(path==="/app/settings/billing/reactivate"&&method==="POST"){
+      const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
+      if(!canManageBilling(principal.role)){json(res,{status:"forbidden"},403);return;}
+      if(!stripeBillingConfigured()){json(res,{status:"not_configured"},503);return;}
+      const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+      await createStripeBillingRuntime(db()).reactivate(scope);
+      await new AuditRepository(db()).record(scope,{actorId:principal.userId,action:"billing.reactivation_requested",targetType:"workspace",targetId:scope.workspaceId,metadata:{}});
+      redirect(res,"/app/settings/billing");return;
+    }
     if(path==="/app/today"&&method==="GET"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
-      const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
+      const configuredModules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
+      const modules=isAtlasPlan(workspace.planId)?intersectBillingEnabledModules(workspace.planId,workspace.billingStatus,configuredModules):[];
       const today=await buildToday({tenantId:principal.tenantId,workspaceId:principal.workspaceId},[createPersistenceTodayProvider(db())]);
       html(res,renderConnectedTodayView({workspaceName:workspace.name,verticalId:workspace.verticalId,planId:workspace.planId,billingStatus:workspace.billingStatus,trialEndsAt:workspace.trialEndsAt,modules,today}));return;
     }
@@ -127,7 +223,8 @@ createServer(async(req,res)=>{
     if(path==="/app/agents"&&method==="GET"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
       const workspace=await new WorkspaceRepository(db()).findScoped(principal.tenantId,principal.workspaceId);if(!workspace){html(res,renderLogin("Workspace access is no longer available."),403);return;}
-      const modules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
+      const configuredModules=await new ModuleConfigurationRepository(db()).enabled(principal.tenantId,principal.workspaceId);
+      const modules=isAtlasPlan(workspace.planId)?intersectBillingEnabledModules(workspace.planId,workspace.billingStatus,configuredModules):[];
       const agents=await seedDefaultAgents(db(),{tenantId:principal.tenantId,workspaceId:principal.workspaceId},workspace.verticalId,modules);
       html(res,renderAgentsPage({workspaceName:workspace.name,agents,canManage:canManageIntegrations(principal.role)}));return;
     }
@@ -139,6 +236,7 @@ createServer(async(req,res)=>{
       const data=await form(req);const enabled=data.get("enabled")==="true";const id=decodeURIComponent(agentToggle[1]);
       const agentRepo=new AgentRepository(db());const agent=await agentRepo.findScoped({tenantId:principal.tenantId,workspaceId:principal.workspaceId},id);
       if(!agent){json(res,{status:"not_found"},404);return;}
+      if(!(await billedModuleAllowed(principal,agent.moduleId))){json(res,{status:"payment_required",message:"Current billing entitlements do not allow this agent module."},402);return;}
       await agentRepo.setEnabled({tenantId:principal.tenantId,workspaceId:principal.workspaceId},id,enabled);
       await new AuditRepository(db()).record({tenantId:principal.tenantId,workspaceId:principal.workspaceId},{actorId:principal.userId,action:enabled?"agent.enabled":"agent.disabled",targetType:"agent",targetId:id,metadata:{moduleId:agent.moduleId}});
       redirect(res,"/app/agents");return;
@@ -185,6 +283,7 @@ createServer(async(req,res)=>{
     if(path==="/app/integrations/webhook/save"&&method==="POST"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
       if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to configure integrations."},403);return;}
+      if(!(await billedModuleAllowed(principal,"agent-governance"))){json(res,{status:"payment_required",message:"Current billing entitlements do not allow integration writes."},402);return;}
       const data=await form(req);
       const baseUrl=(data.get("baseUrl")||"").trim();
       const allowedHosts=(data.get("allowedHosts")||"").split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean);
@@ -245,6 +344,7 @@ createServer(async(req,res)=>{
     if(path==="/app/integrations/google/connect"&&method==="GET"){
       const principal=sessionFrom(req);if(!principal){redirect(res,"/login");return;}
       if(!canManageIntegrations(principal.role)){json(res,{status:"forbidden",message:"Admin role is required to connect Google."},403);return;}
+      if(!(await billedModuleAllowed(principal,"agent-governance"))){json(res,{status:"payment_required",message:"Current billing entitlements do not allow integration writes."},402);return;}
       try{
         const google=createGoogleRuntime(db());
         const started=await google.oauth.begin(principal);

@@ -6,6 +6,7 @@ import {
   ActionItemRepository,
   WorkflowRepository,
   WorkspaceRepository,
+  UsageRepository,
   type StoredWorkflowRun
 } from "../../repositories/src/index.js";
 import {
@@ -121,6 +122,7 @@ export class DurableWorkflowRuntime{
   private readonly audit:AuditRepository;
   private readonly actions:ActionItemRepository;
   private readonly workspaces:WorkspaceRepository;
+  private readonly usage:UsageRepository;
   private readonly maxAttempts:number;
   private readonly retryDelays:number[];
 
@@ -131,6 +133,7 @@ export class DurableWorkflowRuntime{
     this.audit=new AuditRepository(sql);
     this.actions=new ActionItemRepository(sql);
     this.workspaces=new WorkspaceRepository(sql);
+    this.usage=new UsageRepository(sql);
     this.maxAttempts=options.maxAttempts??5;
     this.retryDelays=options.retryDelaysMs??[0,30_000,120_000,600_000,1_800_000];
   }
@@ -170,6 +173,7 @@ export class DurableWorkflowRuntime{
 
     const completed=await this.workflows.updateRun(scope,current.id,{status:"completed",currentStepIndex:definition.steps.length,finished:true,lastError:null});
     await this.audit.record(scope,{actorId:current.initiatedBy,action:"workflow.completed",targetType:"workflow_run",targetId:current.id,metadata:{workflowId:current.workflowId}});
+    await this.usage.record(scope,{metric:"workflow_runs",quantity:1,workflowId:current.workflowId,provider:"atlas",idempotencyKey:"workflow-run:"+current.id});
     return completed!;
   }
 

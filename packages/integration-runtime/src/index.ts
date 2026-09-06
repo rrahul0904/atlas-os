@@ -1,5 +1,5 @@
 import type {AtlasSql} from "../../db/src/index.js";
-import {AuditRepository,IntegrationConnectionRepository} from "../../repositories/src/index.js";
+import {AuditRepository,IntegrationConnectionRepository,UsageRepository} from "../../repositories/src/index.js";
 import type {ToolDefinition} from "../../agent-governance/src/index.js";
 import type {ToolExecutionContext,ToolExecutor} from "../../workflow-runtime/src/index.js";
 import {WorkflowRuntimeError} from "../../workflow-runtime/src/index.js";
@@ -59,6 +59,7 @@ export class IntegrationToolExecutor implements ToolExecutor{
   readonly connector:string;
   private readonly connections:IntegrationConnectionRepository;
   private readonly audit:AuditRepository;
+  private readonly usage:UsageRepository;
 
   constructor(
     private readonly sql:AtlasSql,
@@ -68,6 +69,7 @@ export class IntegrationToolExecutor implements ToolExecutor{
     this.connector=integrationId;
     this.connections=new IntegrationConnectionRepository(sql);
     this.audit=new AuditRepository(sql);
+    this.usage=new UsageRepository(sql);
   }
 
   async execute(tool:ToolDefinition,input:Record<string,unknown>,context:ToolExecutionContext):Promise<Record<string,unknown>>{
@@ -147,6 +149,8 @@ export class IntegrationToolExecutor implements ToolExecutor{
           durationMs:Date.now()-startedAt
         }
       });
+      await this.usage.record(scope,{metric:"external_actions",quantity:1,agentId:context.agentId,workflowId:context.runId,provider:this.connector,idempotencyKey:context.idempotencyKey});
+      await this.usage.record(scope,{metric:"agent_runs",quantity:1,agentId:context.agentId,workflowId:context.runId,provider:this.connector,idempotencyKey:context.idempotencyKey});
       return{
         ok:result.ok,
         status:result.status,
