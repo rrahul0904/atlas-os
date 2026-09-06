@@ -5,7 +5,13 @@ ALTER TABLE atlas_billing_accounts
   ADD COLUMN IF NOT EXISTS last_invoice_ref text,
   ADD COLUMN IF NOT EXISTS last_payment_at timestamptz,
   ADD COLUMN IF NOT EXISTS last_webhook_at timestamptz,
+  ADD COLUMN IF NOT EXISTS subscription_event_created_at timestamptz,
   ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+CREATE UNIQUE INDEX IF NOT EXISTS atlas_billing_customer_ref_unique
+  ON atlas_billing_accounts(customer_ref) WHERE customer_ref IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS atlas_billing_subscription_ref_unique
+  ON atlas_billing_accounts(subscription_ref) WHERE subscription_ref IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS atlas_billing_events (
   id text PRIMARY KEY,
@@ -18,7 +24,9 @@ CREATE TABLE IF NOT EXISTS atlas_billing_events (
   status text NOT NULL DEFAULT 'received' CHECK (status IN ('received','processed','ignored','failed')),
   safe_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   error text,
+  provider_created_at timestamptz NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
+  verified_at timestamptz NOT NULL DEFAULT now(),
   processed_at timestamptz
 );
 
