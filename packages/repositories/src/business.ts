@@ -134,10 +134,10 @@ export class InventoryItemRepository{
     return this.sql.begin(async tx=>{
       const current=await tx`SELECT quantity_on_hand FROM atlas_inventory_items WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} FOR UPDATE`;
       if(!current[0])return null;
-      const delta=input.type==="usage"?-Math.abs(input.quantity):input.type==="adjustment"?input.quantity:Math.abs(input.quantity);
+      const delta=input.type==="usage"?-Math.abs(input.quantity):input.type==="adjustment"?input.quantity:input.type==="reorder"?0:Math.abs(input.quantity);\n      const recordedQuantity=input.type==="reorder"?Math.abs(input.quantity):delta;
       const rows=await tx`UPDATE atlas_inventory_items SET quantity_on_hand=quantity_on_hand+${delta},updated_at=now() WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} RETURNING *`;
       await tx`INSERT INTO atlas_inventory_transactions(id,tenant_id,workspace_id,inventory_item_id,transaction_type,quantity,reason,occurred_at,source,source_integration_id,external_id)
-        VALUES(${transactionId},${scope.tenantId},${scope.workspaceId},${id},${input.type},${delta},${input.reason??null},${input.occurredAt??new Date().toISOString()},${m.source},${m.sourceIntegrationId},${m.externalId})`;
+        VALUES(${transactionId},${scope.tenantId},${scope.workspaceId},${id},${input.type},${recordedQuantity},${input.reason??null},${input.occurredAt??new Date().toISOString()},${m.source},${m.sourceIntegrationId},${m.externalId})`;
       return mapInventory(rows[0]);
     });
   }
