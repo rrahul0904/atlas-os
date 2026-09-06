@@ -1,6 +1,6 @@
 import type {AtlasSql} from "../../db/src/index.js";
 import type {BusinessActionItem,ActionSeverity} from "../../action-center/src/index.js";
-import {ActionItemRepository,TaskRepository,ApprovalRepository} from "../../repositories/src/index.js";
+import {ActionItemRepository,TaskRepository,ApprovalRepository,ContactRepository,LeadRepository,OpportunityRepository,AppointmentRepository,InvoiceRepository,InventoryItemRepository} from "../../repositories/src/index.js";
 
 export type MetricAvailability="value"|"no_data"|"not_connected"|"unavailable";
 
@@ -102,14 +102,35 @@ export function createPersistenceTodayProvider(sql:AtlasSql):TodayProvider{
   const tasks=new TaskRepository(sql);
   const approvals=new ApprovalRepository(sql);
   const actions=new ActionItemRepository(sql);
+  const contacts=new ContactRepository(sql);
+  const leads=new LeadRepository(sql);
+  const opportunities=new OpportunityRepository(sql);
+  const appointments=new AppointmentRepository(sql);
+  const invoices=new InvoiceRepository(sql);
+  const inventory=new InventoryItemRepository(sql);
   return{
     moduleId:"core",
     async getMetrics(ctx){
-      const [taskRows,approvalRows,actionRows]=await Promise.all([tasks.list(ctx),approvals.listPending(ctx),actions.listOpen(ctx)]);
+      const [taskRows,approvalRows,actionRows,contactRows,leadRows,opportunityRows,appointmentRows,invoiceRows,inventoryRows]=await Promise.all([
+        tasks.list(ctx),approvals.listPending(ctx),actions.listOpen(ctx),contacts.list(ctx,500),leads.list(ctx,500),opportunities.list(ctx,500),appointments.list(ctx,500),invoices.list(ctx,500),inventory.list(ctx,500)
+      ]);
+      const now=Date.now();
+      const customerCount=contactRows.filter(row=>row.relationship==="customer"||row.relationship==="patient_reference").length;
+      const openLeadCount=leadRows.filter(row=>!["converted","lost","archived"].includes(row.status)).length;
+      const openOpportunityCount=opportunityRows.filter(row=>row.status==="open").length;
+      const upcomingAppointmentCount=appointmentRows.filter(row=>["scheduled","confirmed"].includes(row.status)&&new Date(row.startsAt).getTime()>=now).length;
+      const openInvoiceCount=invoiceRows.filter(row=>row.status==="open"||row.status==="past_due").length;
+      const lowStockCount=inventoryRows.filter(row=>row.reorderPoint!=null&&row.quantityOnHand<=row.reorderPoint).length;
       return[
         {id:"open-tasks",label:"Open tasks",value:taskRows.filter((r:any)=>r.status!=="done").length,unit:"count",availability:"value",sourceModule:"tasks",evidenceIds:[]},
         {id:"pending-approvals",label:"Pending approvals",value:approvalRows.length,unit:"count",availability:"value",sourceModule:"agent-governance",evidenceIds:[]},
-        {id:"open-actions",label:"Needs attention",value:actionRows.length,unit:"count",availability:"value",sourceModule:"today",evidenceIds:[]}
+        {id:"open-actions",label:"Needs attention",value:actionRows.length,unit:"count",availability:"value",sourceModule:"today",evidenceIds:[]},
+        {id:"customers",label:"Customers",value:customerCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]},
+        {id:"open-leads",label:"Open leads",value:openLeadCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]},
+        {id:"open-opportunities",label:"Open opportunities",value:openOpportunityCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]},
+        {id:"upcoming-appointments",label:"Upcoming appointments",value:upcomingAppointmentCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]},
+        {id:"open-invoices",label:"Open invoices",value:openInvoiceCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]},
+        {id:"low-stock",label:"Low stock",value:lowStockCount,unit:"count",availability:"value",sourceModule:"business-ops",evidenceIds:[]}
       ];
     },
     async getAttention(ctx){
@@ -136,10 +157,12 @@ export function createPersistenceTodayProvider(sql:AtlasSql):TodayProvider{
     },
     async getHandled(){return[];},
     async getUpcoming(ctx){
-      const rows=await tasks.list(ctx);const now=Date.now();
-      return rows.filter((row:any)=>row.status!=="done"&&row.due_at&&new Date(row.due_at).getTime()>=now)
-        .slice(0,20)
+      const [rows,appointmentRows]=await Promise.all([tasks.list(ctx),appointments.list(ctx,100)]);const now=Date.now();
+      const taskItems=rows.filter((row:any)=>row.status!=="done"&&row.due_at&&new Date(row.due_at).getTime()>=now)
         .map((row:any)=>({id:"task:"+row.id,title:row.title,sourceModule:"tasks",dueAt:new Date(row.due_at).toISOString()}));
+      const appointmentItems=appointmentRows.filter(row=>["scheduled","confirmed"].includes(row.status)&&new Date(row.startsAt).getTime()>=now)
+        .map(row=>({id:"appointment:"+row.id,title:row.title,sourceModule:"business-ops",dueAt:row.startsAt}));
+      return[...taskItems,...appointmentItems].sort((a,b)=>a.dueAt.localeCompare(b.dueAt)).slice(0,20);
     }
   };
 }
