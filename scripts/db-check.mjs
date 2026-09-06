@@ -24,7 +24,7 @@ try{
   if(!approvalMode.length) throw new Error("Missing atlas_workspaces.approval_mode");
   const migrations=await sql`SELECT count(*)::int AS count FROM atlas_schema_migrations`;
   if(Number(migrations[0]?.count)!==11) throw new Error(`Expected 11 migrations, found ${migrations[0]?.count ?? 0}`);
-  console.log(`Database contract OK: ${required.length} tables, 10 migrations.`);
+  console.log(`Database contract OK: ${required.length} tables, 11 migrations.`);
 }finally{
   await sql.end({timeout:2});
 }
