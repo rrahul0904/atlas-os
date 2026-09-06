@@ -46,15 +46,20 @@ function html(res:ServerResponse,body:string,status=200){res.writeHead(status,{"
 function json(res:ServerResponse,payload:unknown,status=200){res.writeHead(status,{"content-type":"application/json"});res.end(JSON.stringify(payload));}
 function readBody(req:IncomingMessage,maxBytes=64*1024):Promise<string>{
   return new Promise((resolveBody,reject)=>{
-    const chunks:string[]=[];let size=0;let failed=false;
+    const chunks:Uint8Array[]=[];let size=0;let failed=false;
     req.on("data",chunk=>{
       if(failed)return;
-      const text=typeof chunk==="string"?chunk:Buffer.from(chunk).toString("utf8");
-      size+=text.length;
+      const bytes=typeof chunk==="string"?Buffer.from(chunk,"utf8"):Buffer.from(chunk);
+      size+=bytes.byteLength;
       if(size>maxBytes){failed=true;reject(new Error("request-body-too-large"));return;}
-      chunks.push(text);
+      chunks.push(bytes);
     });
-    req.on("end",()=>{if(!failed)resolveBody(chunks.join(""))});
+    req.on("end",()=>{
+      if(failed)return;
+      const merged=new Uint8Array(size);let offset=0;
+      for(const chunk of chunks){merged.set(chunk,offset);offset+=chunk.byteLength}
+      resolveBody(new TextDecoder().decode(merged));
+    });
     req.on("error",reject);
   });
 }
