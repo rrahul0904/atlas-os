@@ -16,6 +16,7 @@
     "start:web": "node dist/apps/web/src/server.js",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:check": "node scripts/db-check.mjs",
+    "db:upgrade-check": "node scripts/db-upgrade-check.mjs",
     "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo",
     "start:worker": "node dist/apps/worker/src/index.js"
   },
