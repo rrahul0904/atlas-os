@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS atlas_contacts (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(tenant_id,workspace_id,id),
   UNIQUE(workspace_id,source,source_integration_id,external_id)
 );
 CREATE INDEX IF NOT EXISTS atlas_contacts_scope_idx ON atlas_contacts(tenant_id,workspace_id,status,updated_at DESC);
@@ -34,7 +35,9 @@ CREATE TABLE IF NOT EXISTS atlas_leads (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(tenant_id,workspace_id,id),
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_leads_scope_idx ON atlas_leads(tenant_id,workspace_id,status,updated_at DESC);
 
@@ -57,7 +60,9 @@ CREATE TABLE IF NOT EXISTS atlas_opportunities (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL,
+  FOREIGN KEY (tenant_id,workspace_id,lead_id) REFERENCES atlas_leads(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_opportunities_scope_idx ON atlas_opportunities(tenant_id,workspace_id,status,updated_at DESC);
 
@@ -80,7 +85,8 @@ CREATE TABLE IF NOT EXISTS atlas_appointments (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (ends_at > starts_at),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_appointments_scope_idx ON atlas_appointments(tenant_id,workspace_id,status,starts_at);
 
@@ -102,7 +108,8 @@ CREATE TABLE IF NOT EXISTS atlas_communications (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_communications_scope_idx ON atlas_communications(tenant_id,workspace_id,occurred_at DESC);
 
@@ -123,7 +130,9 @@ CREATE TABLE IF NOT EXISTS atlas_invoices (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(tenant_id,workspace_id,id),
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_invoices_scope_idx ON atlas_invoices(tenant_id,workspace_id,status,due_at);
 
@@ -144,7 +153,9 @@ CREATE TABLE IF NOT EXISTS atlas_payments (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,invoice_id) REFERENCES atlas_invoices(tenant_id,workspace_id,id) ON DELETE SET NULL,
+  FOREIGN KEY (tenant_id,workspace_id,contact_id) REFERENCES atlas_contacts(tenant_id,workspace_id,id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS atlas_payments_scope_idx ON atlas_payments(tenant_id,workspace_id,status,paid_at DESC);
 
@@ -166,6 +177,7 @@ CREATE TABLE IF NOT EXISTS atlas_inventory_items (
   sync_version integer NOT NULL DEFAULT 1 CHECK (sync_version >= 1),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(tenant_id,workspace_id,id),
   UNIQUE(workspace_id,source,source_integration_id,external_id)
 );
 CREATE INDEX IF NOT EXISTS atlas_inventory_items_scope_idx ON atlas_inventory_items(tenant_id,workspace_id,status,updated_at DESC);
@@ -184,7 +196,8 @@ CREATE TABLE IF NOT EXISTS atlas_inventory_transactions (
   source_integration_id text,
   external_id text,
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,source,source_integration_id,external_id)
+  UNIQUE(workspace_id,source,source_integration_id,external_id),
+  FOREIGN KEY (tenant_id,workspace_id,inventory_item_id) REFERENCES atlas_inventory_items(tenant_id,workspace_id,id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS atlas_inventory_transactions_scope_idx ON atlas_inventory_transactions(tenant_id,workspace_id,inventory_item_id,occurred_at DESC);
 
