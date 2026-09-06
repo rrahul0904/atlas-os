@@ -30,7 +30,7 @@ async function readBounded(response:Response,maxBytes=512*1024){
 
 export class FetchStripeHttpTransport implements StripeHttpTransport{
   constructor(private readonly secretKey:string){
-    if(!/^sk_(test|live)_/.test(secretKey))throw new Error("stripe-secret-key-invalid");
+    if(!/^(sk|rk)_(test|live)_/.test(secretKey))throw new Error("stripe-secret-key-invalid");
   }
   async request(input:StripeHttpRequest):Promise<StripeHttpResponse>{
     const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),10_000);
@@ -42,6 +42,8 @@ export class FetchStripeHttpTransport implements StripeHttpTransport{
           headers:{
             authorization:"Bearer "+this.secretKey,
             accept:"application/json",
+            "stripe-version":"2026-07-29.dahlia",
+            "user-agent":"AtlasOS/0.1 billing",
             ...(input.method==="GET"?{}:{"content-type":"application/x-www-form-urlencoded"}),
             ...(input.idempotencyKey?{"idempotency-key":input.idempotencyKey}:{})
           },
