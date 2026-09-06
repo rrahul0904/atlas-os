@@ -52,9 +52,10 @@ export function answerAtlas(context:WorkspaceContext,question:string):AtlasAnswe
   }
   if(intent==="unconfirmed"){
     const taskMatches=context.tasks.filter((row:any)=>String(row.title??"").toLowerCase().includes("confirm"));
+    const appointmentMatches=context.business.appointments.filter((row:any)=>row.status==="scheduled");
     const evidence=matchingEvidence(context,["unconfirmed","confirm","appointment"]);
-    if(!taskMatches.length&&!evidence.length)return{intent,answer:"I do not have any connected confirmation or appointment evidence for this workspace.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
-    return{intent,answer:`I found ${taskMatches.length} open confirmation-related tasks and ${evidence.length} related evidence records.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
+    if(!taskMatches.length&&!appointmentMatches.length&&!evidence.length)return{intent,answer:"I do not have any connected confirmation or appointment evidence for this workspace.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
+    return{intent,answer:`I found ${appointmentMatches.length} scheduled appointments not yet marked confirmed, ${taskMatches.length} confirmation-related tasks, and ${evidence.length} related evidence records.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
   }
   if(intent==="risk"){
     const actions=context.actions.filter(item=>item.severity==="critical"||item.risk.toLowerCase().includes("risk"));
@@ -70,7 +71,7 @@ export function answerAtlas(context:WorkspaceContext,question:string):AtlasAnswe
   }
   return{
     intent,
-    answer:`This workspace currently has ${context.actions.length} open action items, ${context.tasks.filter((row:any)=>row.status!=="done").length} open tasks, ${context.approvals.length} pending approvals, and ${context.evidence.length} recent evidence records. Ask about priorities, risks, approvals, revenue, appointments, or deployments for a grounded answer.`,
+    answer:`This workspace currently has ${context.actions.length} open action items, ${context.tasks.filter((row:any)=>row.status!=="done").length} open tasks, ${context.approvals.length} pending approvals, ${context.business.leads.filter((row:any)=>!["converted","lost","archived"].includes(row.status)).length} open leads, ${context.business.opportunities.filter((row:any)=>row.status==="open").length} open opportunities, and ${context.business.appointments.filter((row:any)=>["scheduled","confirmed"].includes(row.status)).length} active appointments. Ask about priorities, risks, approvals, revenue, appointments, or deployments for a grounded answer.`,
     evidence:[],
     actionIds:[],
     generatedFrom:"deterministic_evidence"

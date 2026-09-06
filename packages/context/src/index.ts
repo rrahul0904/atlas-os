@@ -10,7 +10,13 @@ import {
   ActionItemRepository,
   TaskRepository,
   ApprovalRepository,
-  EventRepository
+  EventRepository,
+  ContactRepository,
+  LeadRepository,
+  OpportunityRepository,
+  AppointmentRepository,
+  InvoiceRepository,
+  InventoryItemRepository
 } from "../../repositories/src/index.js";
 
 export interface WorkspaceContext{
@@ -30,6 +36,14 @@ export interface WorkspaceContext{
   tasks:any[];
   approvals:any[];
   events:any[];
+  business:{
+    contacts:any[];
+    leads:any[];
+    opportunities:any[];
+    appointments:any[];
+    invoices:any[];
+    inventory:any[];
+  };
   resolvedAt:string;
 }
 
@@ -37,14 +51,20 @@ export async function resolveWorkspaceContext(sql:AtlasSql,principal:TenantPrinc
   requireWorkspaceAccess(principal,principal.tenantId,principal.workspaceId,"viewer");
   const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
   const workspaceRepo=new WorkspaceRepository(sql);
-  const [workspace,modules,evidence,actions,tasks,approvals,events]=await Promise.all([
+  const [workspace,modules,evidence,actions,tasks,approvals,events,contacts,leads,opportunities,appointments,invoices,inventory]=await Promise.all([
     workspaceRepo.findScoped(scope.tenantId,scope.workspaceId),
     new ModuleConfigurationRepository(sql).enabled(scope.tenantId,scope.workspaceId),
     new EvidenceRepository(sql).listRecent(scope,100),
     new ActionItemRepository(sql).listOpen(scope,100),
     new TaskRepository(sql).list(scope),
     new ApprovalRepository(sql).listPending(scope),
-    new EventRepository(sql).recent(scope,100)
+    new EventRepository(sql).recent(scope,100),
+    new ContactRepository(sql).list(scope,100),
+    new LeadRepository(sql).list(scope,100),
+    new OpportunityRepository(sql).list(scope,100),
+    new AppointmentRepository(sql).list(scope,100),
+    new InvoiceRepository(sql).list(scope,100),
+    new InventoryItemRepository(sql).list(scope,100)
   ]);
   if(!workspace)throw new Error("workspace-not-found");
   return{
@@ -64,6 +84,14 @@ export async function resolveWorkspaceContext(sql:AtlasSql,principal:TenantPrinc
     tasks:[...tasks],
     approvals:[...approvals],
     events:[...events],
+    business:{
+      contacts:[...contacts],
+      leads:[...leads],
+      opportunities:[...opportunities],
+      appointments:[...appointments],
+      invoices:[...invoices],
+      inventory:[...inventory]
+    },
     resolvedAt:new Date().toISOString()
   };
 }

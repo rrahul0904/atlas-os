@@ -1,0 +1,32 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {randomUUID} from "node:crypto";
+import {db,closeDb} from "../../db/src/index.js";
+import {UserRepository,provisionWorkspace,ContactRepository,LeadRepository,OpportunityRepository,AppointmentRepository,InvoiceRepository,InventoryItemRepository} from "../../repositories/src/index.js";
+import {buildToday,createPersistenceTodayProvider} from "./index.js";
+
+test("connected Today derives metrics and upcoming work from native business records",async()=>{
+  if(!process.env.DATABASE_URL)return;
+  const sql=db();const user=await new UserRepository(sql).create({email:`today-business-${randomUUID()}@example.test`,passwordHash:"test-hash"});
+  const provisioned=await provisionWorkspace(sql,{userId:user.id,workspaceName:`Today Business ${randomUUID().slice(0,8)}`,verticalId:"dental",moduleIds:["today","business-ops"],planId:"business"});
+  const scope={tenantId:provisioned.tenantId,workspaceId:provisioned.workspaceId};
+  const contact=await new ContactRepository(sql).create(scope,{relationship:"patient_reference",displayName:"Patient Ref"});
+  const lead=await new LeadRepository(sql).create(scope,{contactId:contact.id,title:"New patient inquiry",status:"new"});
+  await new OpportunityRepository(sql).create(scope,{contactId:contact.id,leadId:lead.id,name:"New patient conversion",status:"open"});
+  const start=new Date(Date.now()+86400000).toISOString();const end=new Date(Date.now()+90000000).toISOString();
+  const appointment=await new AppointmentRepository(sql).create(scope,{contactId:contact.id,title:"New patient appointment",status:"scheduled",startsAt:start,endsAt:end,timezone:"America/New_York"});
+  await new InvoiceRepository(sql).create(scope,{contactId:contact.id,status:"past_due",totalAmount:250,currency:"USD"});
+  await new InventoryItemRepository(sql).create(scope,{name:"Gloves",quantityOnHand:2,reorderPoint:5});
+  const snapshot=await buildToday(scope,[createPersistenceTodayProvider(sql)]);
+  const metric=(id:string)=>snapshot.metrics.find(row=>row.id===id)?.value;
+  assert.equal(metric("customers"),1);
+  assert.equal(metric("open-leads"),1);
+  assert.equal(metric("open-opportunities"),1);
+  assert.equal(metric("upcoming-appointments"),1);
+  assert.equal(metric("open-invoices"),1);
+  assert.equal(metric("low-stock"),1);
+  assert.ok(snapshot.upcoming.some(row=>row.id==="appointment:"+appointment.id));
+  const empty=await buildToday({tenantId:scope.tenantId,workspaceId:"wrong-workspace"},[createPersistenceTodayProvider(sql)]);
+  assert.equal(empty.metrics.find(row=>row.id==="customers")?.value,0);
+  await closeDb();
+});
