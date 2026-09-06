@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install --ignore-scripts
+      - name: Verify upgrade from previous production schema
+        run: npm run db:upgrade-check
       - name: Apply versioned AtlasOS migrations
         run: npm run db:migrate
       - name: Verify canonical database contract
