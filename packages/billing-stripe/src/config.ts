@@ -17,7 +17,7 @@ function httpsUrl(value:string,name:string,production:boolean){
 export function stripeBillingConfigFromEnv(env=process.env):StripeBillingConfig{
   const secretKey=env.STRIPE_SECRET_KEY?.trim()??"";
   const webhookSecret=env.STRIPE_WEBHOOK_SECRET?.trim()??"";
-  if(!/^sk_(test|live)_/.test(secretKey))throw new Error("stripe-secret-key-not-configured");
+  if(!/^(sk|rk)_(test|live)_/.test(secretKey))throw new Error("stripe-secret-key-not-configured");
   if(!webhookSecret.startsWith("whsec_"))throw new Error("stripe-webhook-secret-not-configured");
   const prices={
     solo:env.STRIPE_PRICE_SOLO?.trim()??"",
