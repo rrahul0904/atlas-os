@@ -199,7 +199,8 @@ export class ActionItemRepository{
 export interface StoredBillingAccount{
   tenantId:string;workspaceId:string;provider:string;customerRef:string|null;subscriptionRef:string|null;
   status:string;planId:string;priceRef:string|null;currentPeriodEnd:string|null;cancelAtPeriodEnd:boolean;
-  trialEndsAt:string|null;lastInvoiceRef:string|null;lastPaymentAt:string|null;lastWebhookAt:string|null;updatedAt:string;
+  trialEndsAt:string|null;lastInvoiceRef:string|null;lastPaymentAt:string|null;lastWebhookAt:string|null;
+  subscriptionEventCreatedAt:string|null;createdAt:string;updatedAt:string;
 }
 
 function mapBilling(row:any):StoredBillingAccount{
@@ -209,7 +210,9 @@ function mapBilling(row:any):StoredBillingAccount{
     priceRef:row.price_ref??null,currentPeriodEnd:row.current_period_end?new Date(row.current_period_end).toISOString():null,
     cancelAtPeriodEnd:Boolean(row.cancel_at_period_end),trialEndsAt:row.trial_ends_at?new Date(row.trial_ends_at).toISOString():null,
     lastInvoiceRef:row.last_invoice_ref??null,lastPaymentAt:row.last_payment_at?new Date(row.last_payment_at).toISOString():null,
-    lastWebhookAt:row.last_webhook_at?new Date(row.last_webhook_at).toISOString():null,updatedAt:new Date(row.updated_at).toISOString()
+    lastWebhookAt:row.last_webhook_at?new Date(row.last_webhook_at).toISOString():null,
+    subscriptionEventCreatedAt:row.subscription_event_created_at?new Date(row.subscription_event_created_at).toISOString():null,
+    createdAt:new Date(row.created_at).toISOString(),updatedAt:new Date(row.updated_at).toISOString()
   };
 }
 
@@ -219,44 +222,69 @@ export class BillingRepository{
     const rows=await this.sql`SELECT * FROM atlas_billing_accounts WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} LIMIT 1`;
     return rows[0]?mapBilling(rows[0]):null;
   }
-  async ensure(scope:{tenantId:string;workspaceId:string},planId:string,status="trialing"){
-    const rows=await this.sql`INSERT INTO atlas_billing_accounts(workspace_id,tenant_id,status,plan_id)
-      VALUES(${scope.workspaceId},${scope.tenantId},${status},${planId})
-      ON CONFLICT(workspace_id) DO UPDATE SET updated_at=now()
+  async ensure(scope:{tenantId:string;workspaceId:string},planId:string,status="trialing",trialEndsAt:string|null=null):Promise<StoredBillingAccount>{
+    const rows=await this.sql`INSERT INTO atlas_billing_accounts(workspace_id,tenant_id,status,plan_id,trial_ends_at)
+      VALUES(${scope.workspaceId},${scope.tenantId},${status},${planId},${trialEndsAt})
+      ON CONFLICT(workspace_id) DO UPDATE SET
+        trial_ends_at=COALESCE(atlas_billing_accounts.trial_ends_at,excluded.trial_ends_at),updated_at=now()
       WHERE atlas_billing_accounts.tenant_id=excluded.tenant_id RETURNING *`;
     if(!rows[0])throw new Error("billing-scope-conflict");
     return mapBilling(rows[0]);
   }
   async setCustomer(scope:{tenantId:string;workspaceId:string},customerRef:string){
     const rows=await this.sql`UPDATE atlas_billing_accounts SET customer_ref=${customerRef},updated_at=now()
-      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+        AND (customer_ref IS NULL OR customer_ref=${customerRef}) RETURNING *`;
     return rows[0]?mapBilling(rows[0]):null;
   }
   async applySubscription(scope:{tenantId:string;workspaceId:string},input:{
     customerRef?:string|null;subscriptionRef:string;status:string;planId:string;priceRef:string;
-    currentPeriodEnd?:string|null;cancelAtPeriodEnd?:boolean;trialEndsAt?:string|null;
+    currentPeriodEnd?:string|null;cancelAtPeriodEnd?:boolean;trialEndsAt?:string|null;providerCreatedAt:string;
   }){
-    const rows=await this.sql`UPDATE atlas_billing_accounts SET
-      customer_ref=COALESCE(${input.customerRef??null},customer_ref),subscription_ref=${input.subscriptionRef},
-      status=${input.status},plan_id=${input.planId},price_ref=${input.priceRef},
-      current_period_end=${input.currentPeriodEnd??null},cancel_at_period_end=${input.cancelAtPeriodEnd??false},
-      trial_ends_at=${input.trialEndsAt??null},last_webhook_at=now(),updated_at=now()
-      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
-    return rows[0]?mapBilling(rows[0]):null;
+    return this.sql.begin(async tx=>{
+      const rows=await tx`UPDATE atlas_billing_accounts SET
+        customer_ref=COALESCE(${input.customerRef??null},customer_ref),subscription_ref=${input.subscriptionRef},
+        status=${input.status},plan_id=${input.planId},price_ref=${input.priceRef},
+        current_period_end=${input.currentPeriodEnd??null},cancel_at_period_end=${input.cancelAtPeriodEnd??false},
+        trial_ends_at=${input.trialEndsAt??null},last_webhook_at=now(),
+        subscription_event_created_at=${input.providerCreatedAt},updated_at=now()
+        WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+          AND (subscription_event_created_at IS NULL OR subscription_event_created_at<=${input.providerCreatedAt})
+        RETURNING *`;
+      if(!rows[0])return null;
+      await tx`UPDATE atlas_workspaces SET plan_id=${input.planId},billing_status=${input.status},
+        trial_ends_at=${input.trialEndsAt??null}
+        WHERE tenant_id=${scope.tenantId} AND id=${scope.workspaceId}`;
+      return mapBilling(rows[0]);
+    });
   }
-  async markCanceled(scope:{tenantId:string;workspaceId:string},subscriptionRef:string){
-    const rows=await this.sql`UPDATE atlas_billing_accounts SET status='canceled',subscription_ref=${subscriptionRef},
-      cancel_at_period_end=false,last_webhook_at=now(),updated_at=now()
-      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
-    return rows[0]?mapBilling(rows[0]):null;
+  async markCanceled(scope:{tenantId:string;workspaceId:string},subscriptionRef:string,providerCreatedAt:string){
+    return this.sql.begin(async tx=>{
+      const rows=await tx`UPDATE atlas_billing_accounts SET status='canceled',subscription_ref=${subscriptionRef},
+        cancel_at_period_end=false,last_webhook_at=now(),subscription_event_created_at=${providerCreatedAt},updated_at=now()
+        WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId}
+          AND (subscription_event_created_at IS NULL OR subscription_event_created_at<=${providerCreatedAt})
+        RETURNING *`;
+      if(!rows[0])return null;
+      await tx`UPDATE atlas_workspaces SET billing_status='canceled' WHERE tenant_id=${scope.tenantId} AND id=${scope.workspaceId}`;
+      return mapBilling(rows[0]);
+    });
   }
   async markInvoice(scope:{tenantId:string;workspaceId:string},input:{invoiceRef:string;paid:boolean;status:string}){
-    const rows=await this.sql`UPDATE atlas_billing_accounts SET
-      last_invoice_ref=${input.invoiceRef},last_payment_at=CASE WHEN ${input.paid} THEN now() ELSE last_payment_at END,
-      status=CASE WHEN ${input.paid} AND status='past_due' THEN 'active' WHEN NOT ${input.paid} THEN ${input.status} ELSE status END,
-      last_webhook_at=now(),updated_at=now()
-      WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
-    return rows[0]?mapBilling(rows[0]):null;
+    return this.sql.begin(async tx=>{
+      const rows=await tx`UPDATE atlas_billing_accounts SET
+        last_invoice_ref=${input.invoiceRef},last_payment_at=CASE WHEN ${input.paid} THEN now() ELSE last_payment_at END,
+        status=CASE
+          WHEN ${input.paid} AND status='past_due' THEN 'active'
+          WHEN NOT ${input.paid} AND status NOT IN ('canceled','unpaid','incomplete_expired') THEN ${input.status}
+          ELSE status END,
+        last_webhook_at=now(),updated_at=now()
+        WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} RETURNING *`;
+      if(!rows[0])return null;
+      await tx`UPDATE atlas_workspaces SET billing_status=${rows[0].status}
+        WHERE tenant_id=${scope.tenantId} AND id=${scope.workspaceId}`;
+      return mapBilling(rows[0]);
+    });
   }
   async findByCustomerRef(customerRef:string):Promise<StoredBillingAccount|null>{
     const rows=await this.sql`SELECT * FROM atlas_billing_accounts WHERE provider='stripe' AND customer_ref=${customerRef} LIMIT 1`;
@@ -264,6 +292,9 @@ export class BillingRepository{
   }
 }
 
+export interface StoredCheckoutSession{
+  tenantId:string;workspaceId:string;requestedPlanId:"solo"|"professional"|"business"|"platform";sessionRef:string;
+}
 export class CheckoutSessionRepository{
   constructor(private readonly sql:AtlasSql){}
   async create(scope:{tenantId:string;workspaceId:string},input:{planId:string;sessionRef:string;createdBy:string}){
@@ -273,19 +304,27 @@ export class CheckoutSessionRepository{
     return id;
   }
   async complete(scope:{tenantId:string;workspaceId:string},sessionRef:string){
-    const rows=await this.sql`UPDATE atlas_checkout_sessions SET status='completed',completed_at=now()
+    const rows=await this.sql`UPDATE atlas_checkout_sessions SET status='completed',completed_at=COALESCE(completed_at,now())
       WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND stripe_session_ref=${sessionRef} RETURNING id`;
     return Boolean(rows[0]);
+  }
+  async findBySessionRef(sessionRef:string):Promise<StoredCheckoutSession|null>{
+    const rows=await this.sql`SELECT tenant_id,workspace_id,requested_plan_id,stripe_session_ref FROM atlas_checkout_sessions WHERE stripe_session_ref=${sessionRef} LIMIT 1`;
+    const row=rows[0];if(!row)return null;
+    return{tenantId:row.tenant_id,workspaceId:row.workspace_id,requestedPlanId:row.requested_plan_id,sessionRef:row.stripe_session_ref};
   }
 }
 
 export class BillingEventRepository{
   constructor(private readonly sql:AtlasSql){}
-  async receive(input:{stripeEventId:string;eventType:string;livemode:boolean}){
+  async receive(input:{stripeEventId:string;eventType:string;livemode:boolean;providerCreatedAt:string}){
     const id=randomUUID();
-    const rows=await this.sql`INSERT INTO atlas_billing_events(id,stripe_event_id,event_type,livemode,status)
-      VALUES(${id},${input.stripeEventId},${input.eventType},${input.livemode},'received')
-      ON CONFLICT(stripe_event_id) DO NOTHING RETURNING id`;
+    const rows=await this.sql`INSERT INTO atlas_billing_events(id,stripe_event_id,event_type,livemode,status,provider_created_at,verified_at)
+      VALUES(${id},${input.stripeEventId},${input.eventType},${input.livemode},'received',${input.providerCreatedAt},now())
+      ON CONFLICT(stripe_event_id) DO UPDATE SET
+        status='received',verified_at=now(),provider_created_at=excluded.provider_created_at,error=NULL,processed_at=NULL
+      WHERE atlas_billing_events.status='failed'
+      RETURNING id`;
     return rows[0]?.id as string|undefined;
   }
   async processed(id:string,scope:{tenantId:string;workspaceId:string}|null,input:{objectRef?:string|null;metadata?:Record<string,unknown>;ignored?:boolean}={}){
@@ -576,6 +615,7 @@ export async function provisionWorkspace(sql:AtlasSql,input:{userId:string;works
     const tenantId=randomUUID();const workspaceId=randomUUID();const planId=input.planId??"business";
     await tx`INSERT INTO atlas_tenants(id,name) VALUES(${tenantId},${input.workspaceName})`;
     await tx`INSERT INTO atlas_workspaces(id,tenant_id,name,vertical_id,plan_id,billing_status,trial_ends_at) VALUES(${workspaceId},${tenantId},${input.workspaceName},${input.verticalId},${planId},'trialing',now()+interval '14 days')`;
+    await tx`INSERT INTO atlas_billing_accounts(workspace_id,tenant_id,status,plan_id,trial_ends_at) VALUES(${workspaceId},${tenantId},'trialing',${planId},now()+interval '14 days')`;
     await tx`INSERT INTO atlas_memberships(workspace_id,tenant_id,user_id,role,status) VALUES(${workspaceId},${tenantId},${input.userId},'owner','active')`;
     for(const moduleId of input.moduleIds)await tx`INSERT INTO atlas_workspace_modules(workspace_id,tenant_id,module_id,enabled) VALUES(${workspaceId},${tenantId},${moduleId},true)`;
     return{tenantId,workspaceId,planId};
