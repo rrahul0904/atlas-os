@@ -2,7 +2,7 @@ import {createServer,type IncomingMessage,type ServerResponse} from "node:http";
 import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {dirname,resolve} from "node:path";
-import {renderDemo,renderIndex,type DemoId} from "./render.js";
+import {renderDemo,renderIndex,type DemoId} from "./render.js";\nimport {renderKernelDemo} from "./kernel-demo.js";
 import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
 import {renderConnectedTodayView} from "./connected-today.js";
 import {renderAgentsPage,renderApprovalsPage,renderWorkflowsPage} from "./operations-pages.js";
