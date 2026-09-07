@@ -13,7 +13,8 @@ export interface ProductHandled{id:string;title:string;when:string;kind:string}
 
 export interface AtlasProductModel{
   mode:ProductMode;
-  workspace:{id:string;name:string;verticalId:string;planId:string;billingStatus:string};
+  workspace:{id:string;tenantId:string;name:string;verticalId:string;planId:string;billingStatus:string};
+  principalRole:string|null;
   terminology:BusinessTerminology;
   modules:string[];
   metrics:ProductMetric[];
