@@ -2,7 +2,8 @@ import {createServer,type IncomingMessage,type ServerResponse} from "node:http";
 import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {dirname,resolve} from "node:path";
-import {renderDemo,renderIndex,type DemoId} from "./render.js";\nimport {renderKernelDemo} from "./kernel-demo.js";
+import {renderDemo,renderIndex,type DemoId} from "./render.js";
+import {renderKernelDemo} from "./kernel-demo.js";
 import {renderSignup,renderLogin,renderOnboarding} from "./auth-pages.js";
 import {renderConnectedTodayView} from "./connected-today.js";
 import {renderAgentsPage,renderApprovalsPage,renderWorkflowsPage} from "./operations-pages.js";
@@ -90,6 +91,7 @@ createServer(async(req,res)=>{
     if(path==="/ready"){if(!runtimeReady()){json(res,{status:"not_ready",auth:Boolean(authSecret()),database:databaseConfigured(),google:googleDeclared()?googleRuntimeConfigured():"not_configured",stripe:stripeDeclared()?stripeBillingConfigured():"not_configured"},503);return;}const health=await dbHealth();json(res,{status:health.status,google:googleDeclared()?"configured":"not_configured",stripe:stripeDeclared()?"configured":"not_configured"},health.status==="ok"?200:503);return;}
     if(path==="/assets/atlas.css"){const css=await readFile(resolve(root,"apps/web/static/atlas.css"),"utf8");res.writeHead(200,{"content-type":"text/css; charset=utf-8"});res.end(css);return;}
     if(path==="/"&&method==="GET"){html(res,renderIndex());return;}
+    if(path==="/demo/kernel"&&method==="GET"){html(res,renderKernelDemo());return;}
     const demoMatch=path.match(/^\/demo\/(founder|ceo|dental|contractor|agency)$/);
     if(demoMatch&&method==="GET"&&validDemo.has(demoMatch[1] as DemoId)){html(res,renderDemo(demoMatch[1] as DemoId));return;}
 
