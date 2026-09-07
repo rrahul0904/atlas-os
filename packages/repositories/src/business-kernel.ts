@@ -109,8 +109,8 @@ const activeBookingStatuses=["tentative","scheduled","confirmed"];
 export class BookingRepository{
   constructor(private readonly sql:AtlasSql){}
 
-  private async resourcesFor(scope:BusinessScope,bookingId:string,executor:AtlasSql=this.sql):Promise<BookingResourceAssignment[]>{
-    const rows=await executor`SELECT resource_id,quantity FROM atlas_booking_resources WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND booking_id=${bookingId} ORDER BY resource_id`;
+  private async resourcesFor(scope:BusinessScope,bookingId:string):Promise<BookingResourceAssignment[]>{
+    const rows=await this.sql`SELECT resource_id,quantity FROM atlas_booking_resources WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND booking_id=${bookingId} ORDER BY resource_id`;
     return rows.map((r:any)=>({resourceId:r.resource_id,quantity:Number(r.quantity)}));
   }
 
@@ -194,7 +194,8 @@ export class BookingRepository{
         const appointmentStatus=status==="tentative"?"scheduled":status;
         await tx`UPDATE atlas_appointments SET status=${appointmentStatus},updated_at=now() WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${legacyId}`;
       }
-      return{...mapBookingBase(rows[0]),resources:await this.resourcesFor(scope,id,tx as AtlasSql)};
+      const assignmentRows=await tx`SELECT resource_id,quantity FROM atlas_booking_resources WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND booking_id=${id} ORDER BY resource_id`;
+      return{...mapBookingBase(rows[0]),resources:assignmentRows.map((r:any)=>({resourceId:r.resource_id,quantity:Number(r.quantity)}))};
     });
   }
 }
