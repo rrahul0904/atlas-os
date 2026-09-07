@@ -9,22 +9,49 @@ const context:WorkspaceContext={
   modules:["today"],
   evidence:[{id:"e1",tenantId:"t",workspaceId:"w",sourceType:"metric",sourceId:"conversion",claim:"Checkout conversion dropped from 4.1% to 3.2%",confidence:.99,metadata:{},observedAt:"2026-01-01T00:00:00Z"}],
   actions:[{id:"a1",tenantId:"t",workspaceId:"w",sourceModule:"revenue-intelligence",title:"Checkout conversion dropped",description:"",severity:"critical",businessImpact:"Revenue is at risk.",evidenceIds:["e1"],recommendedAction:"Inspect checkout deployment",risk:"lost revenue",approvalPolicy:"human",status:"open",createdAt:"2026-01-01T00:00:00Z"}],
-  tasks:[],approvals:[],events:[],business:{contacts:[],leads:[],opportunities:[],appointments:[],invoices:[],inventory:[]},resolvedAt:"2026-01-01T00:00:00Z"
+  tasks:[],approvals:[],events:[],
+  business:{
+    contacts:[],leads:[],opportunities:[],appointments:[],locations:[],resources:[],bookings:[],catalogItems:[],orders:[],fulfillments:[],invoices:[],inventory:[]
+  },
+  resolvedAt:"2026-01-01T00:00:00Z"
 };
 
 test("question classifier recognizes revenue questions",()=>assert.equal(classifyAtlasQuestion("Why did revenue drop?"),"revenue_change"));
+test("question classifier recognizes reservation and inventory questions",()=>{
+  assert.equal(classifyAtlasQuestion("Which reservations are coming up today?"),"bookings");
+  assert.equal(classifyAtlasQuestion("What products are low stock?"),"inventory");
+  assert.equal(classifyAtlasQuestion("Which orders are still unfulfilled?"),"fulfillment");
+});
+
 test("next action answer cites stored evidence",()=>{
   const answer=answerAtlas(context,"What should I work on next?");
   assert.equal(answer.actionIds[0],"a1");
   assert.equal(answer.evidence[0].id,"e1");
 });
+
 test("unknown revenue cause fails honestly without evidence",()=>{
   const empty={...context,evidence:[],actions:[]};
   assert.ok(answerAtlas(empty,"Why did revenue fall?").answer.includes("do not have enough"));
 });
 
-test("appointment question uses native scoped appointment state",()=>{
-  const withAppointment={...context,business:{...context.business,appointments:[{id:"apt1",status:"scheduled"}]}};
-  const answer=answerAtlas(withAppointment as WorkspaceContext,"Which appointments are unconfirmed?");
-  assert.ok(answer.answer.includes("1 scheduled appointments"));
+test("unconfirmed question uses canonical booking state regardless of vertical terminology",()=>{
+  const withBooking={...context,business:{...context.business,bookings:[{id:"b1",status:"scheduled",confirmationState:"pending",startsAt:"2099-01-01T00:00:00Z"}]}};
+  const answer=answerAtlas(withBooking as WorkspaceContext,"Which appointments are unconfirmed?");
+  assert.ok(answer.answer.includes("1 scheduled bookings"));
+  assert.equal(answerAtlas(withBooking as WorkspaceContext,"Which reservations are unconfirmed?").intent,"unconfirmed");
+});
+
+test("booking fulfillment and inventory answers are grounded in canonical records",()=>{
+  const grounded={...context,business:{
+    ...context.business,
+    bookings:[
+      {id:"future",status:"confirmed",confirmationState:"confirmed",startsAt:"2099-01-01T00:00:00Z"},
+      {id:"canceled",status:"canceled",confirmationState:"pending",startsAt:"2099-01-02T00:00:00Z"}
+    ],
+    orders:[{id:"o1",status:"confirmed",fulfillmentStatus:"ready"}],
+    inventory:[{id:"i1",quantityOnHand:2,reorderPoint:5}]
+  }} as WorkspaceContext;
+  assert.ok(answerAtlas(grounded,"What bookings are coming up?").answer.includes("1 upcoming bookings"));
+  assert.ok(answerAtlas(grounded,"Which orders are still unfulfilled?").answer.includes("1 unfulfilled orders"));
+  assert.ok(answerAtlas(grounded,"What products are low stock?").answer.includes("1 inventory items"));
 });
