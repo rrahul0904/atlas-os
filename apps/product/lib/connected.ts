@@ -70,7 +70,7 @@ export async function connectedModel(principal:TenantPrincipal):Promise<AtlasPro
 
   const handled=runs.filter(r=>r.status==="completed").slice(0,6).map(r=>({id:r.id,title:definitionNames.get(r.workflowId)||"Workflow completed",when:date(r.finishedAt),kind:"Workflow"}));
   return{
-    mode:"connected",workspace:{id:context.workspace.id,name:context.workspace.name,verticalId:context.workspace.verticalId,planId:context.workspace.planId,billingStatus:context.workspace.billingStatus},
+    mode:"connected",workspace:{id:context.workspace.id,tenantId:context.workspace.tenantId,name:context.workspace.name,verticalId:context.workspace.verticalId,planId:context.workspace.planId,billingStatus:context.workspace.billingStatus},principalRole:principal.role,
     terminology:terms,modules:context.modules,metrics,
     attention:today.attention.map(a=>({id:a.id,title:a.title,why:a.businessImpact,severity:a.severity,entity:a.entity?state(a.entity.type):a.sourceModule,action:a.recommendedAction,status:state(a.status)})),
     upcoming:today.upcoming.map(u=>({id:u.id,title:u.title,when:date(u.dueAt),kind:u.sourceModule})),handled,activity,rows,
