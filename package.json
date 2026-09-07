@@ -17,8 +17,12 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:check": "node scripts/db-check.mjs",
     "db:upgrade-check": "node scripts/db-upgrade-check.mjs",
-    "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo",
-    "start:worker": "node dist/apps/worker/src/index.js"
+    "verify": "node scripts/verify-source-manifest.mjs && npm run typecheck && npm run build && npm test && npm run demo && npm run product:check",
+    "start:worker": "node dist/apps/worker/src/index.js",
+    "product:typecheck": "npm --workspace @atlas/product run typecheck",
+    "product:test": "npm --workspace @atlas/product run test",
+    "product:build": "npm --workspace @atlas/product run build",
+    "product:check": "npm --workspace @atlas/product run check"
   },
   "engines": {
     "node": "22.x"
