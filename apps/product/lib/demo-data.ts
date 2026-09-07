@@ -72,7 +72,7 @@ export function demoModel(vertical:DemoVertical):AtlasProductModel{
     alerts:spec.metrics.filter(m=>m.state==="warn"||m.state==="bad").map((m,i)=>({id:"al"+i,primary:m.label,secondary:"Operational signal",status:m.state==="bad"?"Critical":"Warning",meta:m.note})),
     billing:[{id:"bill",primary:"Business",secondary:"AtlasOS plan",status:"Demo",meta:"Subscription billing is separate from business revenue"}]
   };
-  return{mode:"demo",workspace:{id:"demo-"+vertical,name:spec.name,verticalId:vertical,planId:"business",billingStatus:"demo"},terminology:terms,modules:["today","business-ops","agent-governance"],
+  return{mode:"demo",workspace:{id:"demo-"+vertical,tenantId:"demo",name:spec.name,verticalId:vertical,planId:"business",billingStatus:"demo"},principalRole:null,terminology:terms,modules:["today","business-ops","agent-governance"],
     metrics:spec.metrics,attention:rows.alerts.map(r=>({id:r.id,title:r.primary,why:r.meta,severity:"warning",entity:r.secondary,action:"Inspect",status:r.status})),
     upcoming:spec.bookings.slice(0,3).map(r=>({id:r.id,title:r.primary,when:r.meta,kind:terms.booking})),handled:[{id:"h1",title:"Workspace signals normalized",when:"Just now",kind:"Atlas"}],
     activity,rows,counts:{pendingApprovals:rows.approvals.length,alerts:rows.alerts.length}};
