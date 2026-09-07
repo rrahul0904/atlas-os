@@ -75,12 +75,27 @@ const mapAppointment=(r:any):StoredAppointment=>({id:r.id,tenantId:r.tenant_id,w
 export class AppointmentRepository{
   constructor(private readonly sql:AtlasSql){}
   async create(scope:BusinessScope,input:{contactId?:string|null;title:string;status?:"scheduled"|"confirmed"|"completed"|"canceled"|"no_show";startsAt:string;endsAt:string;timezone:string;serviceCategory?:string|null}&SourceMetadata){
-    const id=randomUUID(),m=source(input);const rows=await this.sql`INSERT INTO atlas_appointments(id,tenant_id,workspace_id,contact_id,title,status,starts_at,ends_at,timezone,service_category,source,source_integration_id,external_id,last_synced_at,sync_version)
-      VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.contactId??null},${input.title},${input.status??"scheduled"},${input.startsAt},${input.endsAt},${input.timezone},${input.serviceCategory??null},${m.source},${m.sourceIntegrationId},${m.externalId},${m.lastSyncedAt},${m.syncVersion}) RETURNING *`;return mapAppointment(rows[0])
+    const id=randomUUID(),m=source(input),status=input.status??"scheduled";
+    return this.sql.begin(async tx=>{
+      const rows=await tx`INSERT INTO atlas_appointments(id,tenant_id,workspace_id,contact_id,title,status,starts_at,ends_at,timezone,service_category,source,source_integration_id,external_id,last_synced_at,sync_version)
+        VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.contactId??null},${input.title},${status},${input.startsAt},${input.endsAt},${input.timezone},${input.serviceCategory??null},${m.source},${m.sourceIntegrationId},${m.externalId},${m.lastSyncedAt},${m.syncVersion}) RETURNING *`;
+      await tx`INSERT INTO atlas_bookings(id,tenant_id,workspace_id,contact_id,legacy_appointment_id,title,booking_type,status,confirmation_state,starts_at,ends_at,timezone,demand_quantity,source,source_integration_id,external_id,last_synced_at,sync_version)
+        VALUES(${id},${scope.tenantId},${scope.workspaceId},${input.contactId??null},${id},${input.title},'appointment',${status},${status==="confirmed"?"confirmed":"pending"},${input.startsAt},${input.endsAt},${input.timezone},1,${m.source},${m.sourceIntegrationId},${m.externalId},${m.lastSyncedAt},${m.syncVersion})
+        ON CONFLICT(id) DO NOTHING`;
+      return mapAppointment(rows[0]);
+    });
   }
   async findScoped(scope:BusinessScope,id:string){const rows=await this.sql`SELECT * FROM atlas_appointments WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} LIMIT 1`;return rows[0]?mapAppointment(rows[0]):null}
   async list(scope:BusinessScope,limit=100){const n=limitValue(limit);const rows=await this.sql`SELECT * FROM atlas_appointments WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} ORDER BY starts_at DESC LIMIT ${n}`;return rows.map(mapAppointment)}
-  async setStatus(scope:BusinessScope,id:string,status:StoredAppointment["status"]){const rows=await this.sql`UPDATE atlas_appointments SET status=${status},updated_at=now() WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} RETURNING *`;return rows[0]?mapAppointment(rows[0]):null}
+  async setStatus(scope:BusinessScope,id:string,status:StoredAppointment["status"]){
+    return this.sql.begin(async tx=>{
+      const rows=await tx`UPDATE atlas_appointments SET status=${status},updated_at=now() WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND id=${id} RETURNING *`;
+      if(!rows[0])return null;
+      await tx`UPDATE atlas_bookings SET status=${status},confirmation_state=CASE WHEN ${status}='confirmed' THEN 'confirmed' ELSE confirmation_state END,updated_at=now()
+        WHERE tenant_id=${scope.tenantId} AND workspace_id=${scope.workspaceId} AND legacy_appointment_id=${id}`;
+      return mapAppointment(rows[0]);
+    });
+  }
 }
 
 export interface StoredCommunication{id:string;tenantId:string;workspaceId:string;contactId:string|null;channel:string;direction:string;status:string;subject:string|null;bodyPreview:string|null;occurredAt:string;source:string;externalId:string|null;createdAt:string}

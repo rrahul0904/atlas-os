@@ -623,3 +623,4 @@ export async function provisionWorkspace(sql:AtlasSql,input:{userId:string;works
 }
 
 export * from "./business.js";
+export * from "./business-kernel.js";

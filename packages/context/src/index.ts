@@ -15,6 +15,12 @@ import {
   LeadRepository,
   OpportunityRepository,
   AppointmentRepository,
+  LocationRepository,
+  ResourceRepository,
+  BookingRepository,
+  CatalogRepository,
+  OrderRepository,
+  FulfillmentRepository,
   InvoiceRepository,
   InventoryItemRepository
 } from "../../repositories/src/index.js";
@@ -41,6 +47,12 @@ export interface WorkspaceContext{
     leads:any[];
     opportunities:any[];
     appointments:any[];
+    locations:any[];
+    resources:any[];
+    bookings:any[];
+    catalogItems:any[];
+    orders:any[];
+    fulfillments:any[];
     invoices:any[];
     inventory:any[];
   };
@@ -51,7 +63,10 @@ export async function resolveWorkspaceContext(sql:AtlasSql,principal:TenantPrinc
   requireWorkspaceAccess(principal,principal.tenantId,principal.workspaceId,"viewer");
   const scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
   const workspaceRepo=new WorkspaceRepository(sql);
-  const [workspace,modules,evidence,actions,tasks,approvals,events,contacts,leads,opportunities,appointments,invoices,inventory]=await Promise.all([
+  const [
+    workspace,modules,evidence,actions,tasks,approvals,events,contacts,leads,opportunities,appointments,
+    locations,resources,bookings,catalogItems,orders,fulfillments,invoices,inventory
+  ]=await Promise.all([
     workspaceRepo.findScoped(scope.tenantId,scope.workspaceId),
     new ModuleConfigurationRepository(sql).enabled(scope.tenantId,scope.workspaceId),
     new EvidenceRepository(sql).listRecent(scope,100),
@@ -63,6 +78,12 @@ export async function resolveWorkspaceContext(sql:AtlasSql,principal:TenantPrinc
     new LeadRepository(sql).list(scope,100),
     new OpportunityRepository(sql).list(scope,100),
     new AppointmentRepository(sql).list(scope,100),
+    new LocationRepository(sql).list(scope,100),
+    new ResourceRepository(sql).list(scope,100),
+    new BookingRepository(sql).list(scope,100),
+    new CatalogRepository(sql).list(scope,100),
+    new OrderRepository(sql).list(scope,100),
+    new FulfillmentRepository(sql).list(scope,100),
     new InvoiceRepository(sql).list(scope,100),
     new InventoryItemRepository(sql).list(scope,100)
   ]);
@@ -89,6 +110,12 @@ export async function resolveWorkspaceContext(sql:AtlasSql,principal:TenantPrinc
       leads:[...leads],
       opportunities:[...opportunities],
       appointments:[...appointments],
+      locations:[...locations],
+      resources:[...resources],
+      bookings:[...bookings],
+      catalogItems:[...catalogItems],
+      orders:[...orders],
+      fulfillments:[...fulfillments],
       invoices:[...invoices],
       inventory:[...inventory]
     },

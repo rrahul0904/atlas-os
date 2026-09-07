@@ -1,7 +1,7 @@
 import type {WorkspaceContext} from "../../context/src/index.js";
 import type {EvidenceRecord} from "../../evidence/src/index.js";
 
-export type AtlasIntent="next_action"|"revenue_change"|"approvals"|"unconfirmed"|"risk"|"deployment"|"general";
+export type AtlasIntent="next_action"|"revenue_change"|"approvals"|"unconfirmed"|"bookings"|"fulfillment"|"inventory"|"risk"|"deployment"|"general";
 
 export interface AtlasAnswer{
   intent:AtlasIntent;
@@ -16,7 +16,10 @@ export function classifyAtlasQuestion(question:string):AtlasIntent{
   if(/what.*(work|do).*next|needs? my attention|priority/.test(q))return"next_action";
   if(/revenue|mrr|conversion|sales.*(fall|drop|down)|why.*(revenue|sales)/.test(q))return"revenue_change";
   if(/approval|approve|waiting.*me/.test(q))return"approvals";
-  if(/unconfirmed|not confirmed|patient.*confirm|appointment.*confirm/.test(q))return"unconfirmed";
+  if(/unconfirmed|not confirmed|patient.*confirm|appointment.*confirm|reservation.*confirm|booking.*confirm/.test(q))return"unconfirmed";
+  if(/low stock|inventory|reorder|stock level/.test(q))return"inventory";
+  if(/unfulfilled|fulfillment|fulfilment|order.*(pending|ready|complete)|which orders|open orders/.test(q))return"fulfillment";
+  if(/booking|reservation|appointment|pickup slot|cancell?ed|coming up today|what.*coming up/.test(q))return"bookings";
   if(/risk|at risk|program.*slip|critical/.test(q))return"risk";
   if(/deploy|deployment|release|production/.test(q))return"deployment";
   return"general";
@@ -52,10 +55,34 @@ export function answerAtlas(context:WorkspaceContext,question:string):AtlasAnswe
   }
   if(intent==="unconfirmed"){
     const taskMatches=context.tasks.filter((row:any)=>String(row.title??"").toLowerCase().includes("confirm"));
-    const appointmentMatches=context.business.appointments.filter((row:any)=>row.status==="scheduled");
-    const evidence=matchingEvidence(context,["unconfirmed","confirm","appointment"]);
-    if(!taskMatches.length&&!appointmentMatches.length&&!evidence.length)return{intent,answer:"I do not have any connected confirmation or appointment evidence for this workspace.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
-    return{intent,answer:`I found ${appointmentMatches.length} scheduled appointments not yet marked confirmed, ${taskMatches.length} confirmation-related tasks, and ${evidence.length} related evidence records.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
+    const bookingMatches=context.business.bookings.filter((row:any)=>row.status==="scheduled"&&row.confirmationState==="pending");
+    const evidence=matchingEvidence(context,["unconfirmed","confirm","appointment","reservation","booking"]);
+    if(!taskMatches.length&&!bookingMatches.length&&!evidence.length)return{intent,answer:"I do not have any connected confirmation or booking evidence for this workspace.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
+    return{intent,answer:`I found ${bookingMatches.length} scheduled bookings not yet marked confirmed, ${taskMatches.length} confirmation-related tasks, and ${evidence.length} related evidence records.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
+  }
+  if(intent==="bookings"){
+    const now=Date.now();
+    const rows=context.business.bookings;
+    const upcoming=rows.filter((row:any)=>["tentative","scheduled","confirmed"].includes(row.status)&&new Date(row.startsAt).getTime()>=now);
+    const canceled=rows.filter((row:any)=>row.status==="canceled");
+    const evidence=matchingEvidence(context,["booking","reservation","appointment","capacity","canceled"]);
+    if(!rows.length&&!evidence.length)return{intent,answer:"I do not have connected booking records for this workspace yet.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
+    return{intent,answer:`There are ${upcoming.length} upcoming bookings and ${canceled.length} canceled bookings in the connected workspace.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
+  }
+  if(intent==="fulfillment"){
+    const orders=context.business.orders;
+    const open=orders.filter((row:any)=>row.status!=="canceled"&&!["fulfilled","canceled"].includes(row.fulfillmentStatus));
+    const ready=orders.filter((row:any)=>row.fulfillmentStatus==="ready");
+    const evidence=matchingEvidence(context,["order","fulfillment","ready","pickup"]);
+    if(!orders.length&&!evidence.length)return{intent,answer:"I do not have connected order or fulfillment records for this workspace yet.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
+    return{intent,answer:`There are ${open.length} unfulfilled orders, including ${ready.length} marked ready.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
+  }
+  if(intent==="inventory"){
+    const rows=context.business.inventory;
+    const low=rows.filter((row:any)=>row.reorderPoint!=null&&row.quantityOnHand<=row.reorderPoint);
+    const evidence=matchingEvidence(context,["inventory","stock","reorder"]);
+    if(!rows.length&&!evidence.length)return{intent,answer:"I do not have connected inventory records for this workspace yet.",evidence:[],actionIds:[],generatedFrom:"deterministic_evidence"};
+    return{intent,answer:`I found ${low.length} inventory items at or below their reorder point.`,evidence:evidenceShape(evidence),actionIds:[],generatedFrom:"deterministic_evidence"};
   }
   if(intent==="risk"){
     const actions=context.actions.filter(item=>item.severity==="critical"||item.risk.toLowerCase().includes("risk"));
@@ -71,7 +98,7 @@ export function answerAtlas(context:WorkspaceContext,question:string):AtlasAnswe
   }
   return{
     intent,
-    answer:`This workspace currently has ${context.actions.length} open action items, ${context.tasks.filter((row:any)=>row.status!=="done").length} open tasks, ${context.approvals.length} pending approvals, ${context.business.leads.filter((row:any)=>!["converted","lost","archived"].includes(row.status)).length} open leads, ${context.business.opportunities.filter((row:any)=>row.status==="open").length} open opportunities, and ${context.business.appointments.filter((row:any)=>["scheduled","confirmed"].includes(row.status)).length} active appointments. Ask about priorities, risks, approvals, revenue, appointments, or deployments for a grounded answer.`,
+    answer:`This workspace currently has ${context.actions.length} open action items, ${context.tasks.filter((row:any)=>row.status!=="done").length} open tasks, ${context.approvals.length} pending approvals, ${context.business.leads.filter((row:any)=>!["converted","lost","archived"].includes(row.status)).length} open leads, ${context.business.opportunities.filter((row:any)=>row.status==="open").length} open opportunities, ${context.business.bookings.filter((row:any)=>["tentative","scheduled","confirmed"].includes(row.status)).length} active bookings, and ${context.business.orders.filter((row:any)=>row.status!=="canceled"&&!["fulfilled","canceled"].includes(row.fulfillmentStatus)).length} unfulfilled orders. Ask about priorities, risks, approvals, revenue, bookings, fulfillment, inventory, or deployments for a grounded answer.`,
     evidence:[],
     actionIds:[],
     generatedFrom:"deterministic_evidence"
