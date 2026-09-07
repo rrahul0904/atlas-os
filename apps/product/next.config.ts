@@ -1,11 +1,16 @@
 import type {NextConfig} from "next";
-import {fileURLToPath} from "node:url";
-import {dirname,resolve} from "node:path";
 
-const here=dirname(fileURLToPath(import.meta.url));
 const nextConfig:NextConfig={
   reactStrictMode:true,
   poweredByHeader:false,
-  turbopack:{root:resolve(here,"../..")}
+  webpack(config){
+    config.resolve.extensionAlias={
+      ...(config.resolve.extensionAlias??{}),
+      ".js":[".ts",".js"],
+      ".jsx":[".tsx",".jsx"],
+      ".mjs":[".mts",".mjs"]
+    };
+    return config;
+  }
 };
 export default nextConfig;
