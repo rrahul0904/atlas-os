@@ -17,5 +17,8 @@
     "verticals/**/*.ts",
     "apps/**/*.ts",
     "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "apps/product/**"
   ]
 }
