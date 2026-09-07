@@ -1,6 +1,7 @@
 import {redirect} from "next/navigation";
 import {AppShell} from "@/components/app-shell";
 import {LiveFeed,SectionView,TodayView} from "@/components/views";
+import {ApprovalView} from "@/components/approval-view";
 import {connectedModel} from "@/lib/connected";
 import {requireAtlasPrincipal} from "@/lib/session";
 import type {ProductSection} from "@/lib/types";
@@ -13,5 +14,5 @@ export default async function ConnectedAppPage({params}:{params:Promise<{section
   const section=(raw==="settings/billing"?"billing":raw) as ProductSection;
   if(!valid.has(section))redirect("/app/today");
   const model=await connectedModel(principal);
-  return <AppShell model={model} active={section}>{section==="today"?<TodayView model={model}/>:section==="live"?<LiveFeed model={model}/>:<SectionView model={model} section={section}/>}</AppShell>;
+  return <AppShell model={model} active={section}>{section==="today"?<TodayView model={model}/>:section==="live"?<LiveFeed model={model}/>:section==="approvals"?<ApprovalView model={model}/>:<SectionView model={model} section={section}/>}</AppShell>;
 }
