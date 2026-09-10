@@ -9,6 +9,10 @@ export function atlasRuntimeConfigured(){
   return Boolean(process.env.DATABASE_URL&&process.env.ATLAS_AUTH_SECRET&&process.env.ATLAS_AUTH_SECRET.length>=32);
 }
 
+export function atlasSignupEnabled(){
+  return atlasRuntimeConfigured()&&process.env.ATLAS_ALLOW_SIGNUP==="true";
+}
+
 export async function optionalAtlasPrincipal():Promise<TenantPrincipal|null>{
   const secret=process.env.ATLAS_AUTH_SECRET;
   if(!secret||secret.length<32)return null;
