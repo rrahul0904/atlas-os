@@ -8,7 +8,8 @@ import {
   ModuleConfigurationRepository,
   EvidenceRepository,
   ActionItemRepository,
-  provisionWorkspace
+  provisionWorkspace,
+  provisionOwnerWorkspace
 } from "./index.js";
 
 test("real Postgres repositories provision, scope, and ground actions in evidence",async()=>{
@@ -30,6 +31,29 @@ test("real Postgres repositories provision, scope, and ground actions in evidenc
   assert.equal((await actions.listOpen(scope))[0].id,action.id);
   assert.equal((await actions.listOpen({tenantId:"wrong-tenant",workspaceId:scope.workspaceId})).length,0);
   assert.equal((await evidenceRepo.findByIds(scope,[evidence.id]))[0].claim,evidence.claim);
+
+  const ownerEmail=`owner-${randomUUID()}@example.test`;
+  const ownerWorkspaceName=`Owner Workspace ${randomUUID().slice(0,8)}`;
+  const owner=await provisionOwnerWorkspace(sql,{
+    email:ownerEmail,displayName:"Owner",passwordHash:"test-hash",workspaceName:ownerWorkspaceName,
+    verticalId:"bakery",moduleIds:["today","business-ops","agent-governance"]
+  });
+  const ownerMembership=await memberships.firstActiveForUser(owner.userId);
+  assert.equal(ownerMembership?.role,"owner");
+  assert.equal(ownerMembership?.workspaceId,owner.workspaceId);
+  assert.deepEqual(await modules.enabled(owner.tenantId,owner.workspaceId),["agent-governance","business-ops","today"]);
+  const billing=await sql`SELECT status,plan_id,trial_ends_at FROM atlas_billing_accounts WHERE tenant_id=${owner.tenantId} AND workspace_id=${owner.workspaceId}`;
+  assert.equal(billing[0]?.status,"trialing");
+  assert.equal(billing[0]?.plan_id,"business");
+  assert.ok(billing[0]?.trial_ends_at);
+
+  const duplicateWorkspaceName=`Should Roll Back ${randomUUID().slice(0,8)}`;
+  await assert.rejects(()=>provisionOwnerWorkspace(sql,{
+    email:ownerEmail,displayName:"Duplicate",passwordHash:"test-hash",workspaceName:duplicateWorkspaceName,
+    verticalId:"founder",moduleIds:["today"]
+  }));
+  const orphanTenants=await sql`SELECT COUNT(*)::int AS count FROM atlas_tenants WHERE name=${duplicateWorkspaceName}`;
+  assert.equal(Number(orphanTenants[0]?.count),0);
 
   await closeDb();
 });
