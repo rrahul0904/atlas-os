@@ -7,6 +7,7 @@ import {BillingView} from "@/components/billing-view";
 import {connectedModel} from "@/lib/connected";
 import {requireAtlasPrincipal} from "@/lib/session";
 import type {ProductSection} from "@/lib/types";
+import {canViewBilling,canViewIntegrations} from "@/lib/permissions";
 
 const valid=new Set<ProductSection>(["today","live","customers","pipeline","bookings","orders","money","inventory","work","agents","workflows","approvals","integrations","alerts","billing"]);
 
@@ -15,6 +16,8 @@ export default async function ConnectedAppPage({params}:{params:Promise<{section
   const raw=route.section?.join("/")||"today";
   const section=(raw==="settings/billing"?"billing":raw) as ProductSection;
   if(!valid.has(section))redirect("/app/today");
+  if(section==="billing"&&!canViewBilling(principal))redirect("/app/today");
+  if(section==="integrations"&&!canViewIntegrations(principal))redirect("/app/today");
   const model=await connectedModel(principal);
   return <AppShell model={model} active={section}>{section==="today"?<TodayView model={model}/>:section==="live"?<LiveFeed model={model}/>:section==="approvals"?<ApprovalView model={model}/>:section==="integrations"?<IntegrationView model={model}/>:section==="billing"?<BillingView model={model}/>:<SectionView model={model} section={section}/>}</AppShell>;
 }
