@@ -9,6 +9,7 @@ import {
 } from "@atlas/repositories";
 import type {TenantPrincipal} from "@atlas/tenancy";
 import type {AtlasProductModel,ProductMetric,ProductRow,ProductSection} from "./types";
+import {canViewBilling,canViewIntegrations} from "./permissions";
 
 function date(value:unknown){if(!value)return"—";const d=new Date(value as string|number|Date);return Number.isFinite(d.getTime())?d.toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"—"}
 function money(value:unknown,currency="USD"){return new Intl.NumberFormat("en-US",{style:"currency",currency,maximumFractionDigits:0}).format(Number(value??0))}
@@ -18,15 +19,16 @@ const emptySections=():Record<ProductSection,ProductRow[]>=>({today:[],live:[],c
 
 export async function connectedModel(principal:TenantPrincipal):Promise<AtlasProductModel>{
   const sql=db(),scope={tenantId:principal.tenantId,workspaceId:principal.workspaceId};
+  const viewIntegrations=canViewIntegrations(principal),viewBilling=canViewBilling(principal);
   const contextPromise=resolveWorkspaceContext(sql,principal);
   const todayPromise=buildToday(scope,[createPersistenceTodayProvider(sql)]);
   const extrasPromise=Promise.all([
     new AgentRepository(sql).list(scope),
     new WorkflowRepository(sql).listDefinitions(scope),
     new WorkflowRepository(sql).listRuns(scope,100),
-    new IntegrationConnectionRepository(sql).list(scope),
-    new BillingRepository(sql).findScoped(scope),
-    new UsageRepository(sql).summary(scope),
+    viewIntegrations?new IntegrationConnectionRepository(sql).list(scope):Promise.resolve([]),
+    viewBilling?new BillingRepository(sql).findScoped(scope):Promise.resolve(null),
+    viewBilling?new UsageRepository(sql).summary(scope):Promise.resolve([]),
     new PaymentRepository(sql).list(scope,100),
     new ProjectRepository(sql).list(scope,100),
     new CampaignRepository(sql).list(scope,100)
