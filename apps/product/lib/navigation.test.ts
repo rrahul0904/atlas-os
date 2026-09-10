@@ -14,4 +14,16 @@ describe("product navigation",()=>{
     expect(productNavigation({mode:"demo",verticalId:"bakery",terms:terminologyFor("bakery"),demoVertical:"bakery"}).some(x=>x.section==="pipeline")).toBe(false);
     expect(productNavigation({mode:"demo",verticalId:"founder",terms:terminologyFor("founder"),demoVertical:"founder"}).some(x=>x.section==="pipeline")).toBe(true);
   });
+  it("omits sensitive connected sections for lower roles",()=>{
+    const terms=terminologyFor("founder");
+    const viewer=productNavigation({mode:"connected",verticalId:"founder",terms,role:"viewer"});
+    const operator=productNavigation({mode:"connected",verticalId:"founder",terms,role:"operator"});
+    const admin=productNavigation({mode:"connected",verticalId:"founder",terms,role:"admin"});
+    expect(viewer.some(x=>x.section==="integrations")).toBe(false);
+    expect(viewer.some(x=>x.section==="billing")).toBe(false);
+    expect(operator.some(x=>x.section==="integrations")).toBe(true);
+    expect(operator.some(x=>x.section==="billing")).toBe(false);
+    expect(admin.some(x=>x.section==="integrations")).toBe(true);
+    expect(admin.some(x=>x.section==="billing")).toBe(true);
+  });
 });
