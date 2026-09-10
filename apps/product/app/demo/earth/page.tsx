@@ -1,0 +1,2 @@
+export const metadata={title:"AtlasOS Live Earth Demo",description:"Interactive Live business observatory preview."};
+export default function EarthDemo(){return <main style={{width:"100vw",height:"100vh",overflow:"hidden",background:"#06080c"}}><iframe title="AtlasOS Live Earth demo" src="/atlas-live-earth.html" style={{width:"100%",height:"100%",border:0,display:"block"}} allow="fullscreen"/></main>}

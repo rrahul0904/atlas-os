@@ -610,6 +610,26 @@ function mapRun(row:any):StoredWorkflowRun{
   return{id:row.id,tenantId:row.tenant_id,workspaceId:row.workspace_id,workflowId:row.workflow_id,status:row.status,currentStepIndex:Number(row.current_step_index),input:row.input??{},state:row.state??{},attemptCount:Number(row.attempt_count),nextAttemptAt:new Date(row.next_attempt_at).toISOString(),initiatedBy:row.initiated_by,startedAt:row.started_at?new Date(row.started_at).toISOString():null,finishedAt:row.finished_at?new Date(row.finished_at).toISOString():null,lastError:row.last_error??null};
 }
 
+export async function provisionOwnerWorkspace(sql:AtlasSql,input:{
+  email:string;displayName?:string|null;passwordHash:string;workspaceName:string;verticalId:string;moduleIds:string[];planId?:string
+}){
+  return sql.begin(async tx=>{
+    const userId=randomUUID(),tenantId=randomUUID(),workspaceId=randomUUID(),planId=input.planId??"business";
+    await tx`INSERT INTO atlas_users(id,email,display_name,password_hash)
+      VALUES(${userId},${input.email.toLowerCase()},${input.displayName??null},${input.passwordHash})`;
+    await tx`INSERT INTO atlas_tenants(id,name) VALUES(${tenantId},${input.workspaceName})`;
+    await tx`INSERT INTO atlas_workspaces(id,tenant_id,name,vertical_id,plan_id,billing_status,trial_ends_at)
+      VALUES(${workspaceId},${tenantId},${input.workspaceName},${input.verticalId},${planId},'trialing',now()+interval '14 days')`;
+    await tx`INSERT INTO atlas_billing_accounts(workspace_id,tenant_id,status,plan_id,trial_ends_at)
+      VALUES(${workspaceId},${tenantId},'trialing',${planId},now()+interval '14 days')`;
+    await tx`INSERT INTO atlas_memberships(workspace_id,tenant_id,user_id,role,status)
+      VALUES(${workspaceId},${tenantId},${userId},'owner','active')`;
+    for(const moduleId of input.moduleIds)await tx`INSERT INTO atlas_workspace_modules(workspace_id,tenant_id,module_id,enabled)
+      VALUES(${workspaceId},${tenantId},${moduleId},true)`;
+    return{userId,tenantId,workspaceId,planId};
+  });
+}
+
 export async function provisionWorkspace(sql:AtlasSql,input:{userId:string;workspaceName:string;verticalId:string;moduleIds:string[];planId?:string}){
   return sql.begin(async tx=>{
     const tenantId=randomUUID();const workspaceId=randomUUID();const planId=input.planId??"business";
